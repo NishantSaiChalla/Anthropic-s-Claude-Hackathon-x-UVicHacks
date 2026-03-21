@@ -97,6 +97,7 @@ let serverCapabilities = {
 let conversationHistory = [];
 let talkRecognition = null;
 let talkAudio = null;
+let talkAbortController = null;
 let isBotSpeaking = false;
 let isTalkListening = false;
 let pendingSessionComplete = false;
@@ -737,6 +738,10 @@ async function enterTalkMode() {
 }
 
 function leaveTalkMode() {
+  if (talkAbortController) {
+    talkAbortController.abort();
+    talkAbortController = null;
+  }
   if (talkRecognition) {
     try { talkRecognition.abort(); } catch { /* ignore */ }
     talkRecognition = null;
@@ -894,6 +899,7 @@ async function sendUserGreeting() {
   }
 
   function playNext() {
+    if (captureMode !== TALK_MODE) return;
     if (isPlayingAudio || audioQueue.length === 0) return;
     isPlayingAudio = true;
     const audio = audioQueue.shift();
@@ -917,11 +923,14 @@ async function sendUserGreeting() {
     audio.play().catch(() => { isPlayingAudio = false; isBotSpeaking = false; });
   }
 
+  talkAbortController = new AbortController();
+
   try {
     const res = await fetch('/api/chat-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [], turnCount: 0 })
+      body: JSON.stringify({ messages: [], turnCount: 0 }),
+      signal: talkAbortController.signal
     });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -945,7 +954,7 @@ async function sendUserGreeting() {
           audioQueue.push(audio);
           if (!isPlayingAudio) {
             isBotSpeaking = true;
-            elements.talkMicButton.textContent = 'Therapist speaking…';
+            elements.talkMicButton.textContent = 'Speaking…';
             elements.talkStatus.textContent = '';
             playNext();
           }
@@ -1000,6 +1009,7 @@ async function sendUserTurn(text) {
   }
 
   function playNext() {
+    if (captureMode !== TALK_MODE) return;
     if (isPlayingAudio || audioQueue.length === 0) return;
     isPlayingAudio = true;
     const audio = audioQueue.shift();
@@ -1032,17 +1042,20 @@ async function sendUserTurn(text) {
     audioQueue.push(audio);
     if (!isPlayingAudio) {
       isBotSpeaking = true;
-      elements.talkMicButton.textContent = 'Therapist speaking…';
+      elements.talkMicButton.textContent = 'Speaking…';
       elements.talkStatus.textContent = '';
       playNext();
     }
   }
 
+  talkAbortController = new AbortController();
+
   try {
     const res = await fetch('/api/chat-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: conversationHistory, turnCount })
+      body: JSON.stringify({ messages: conversationHistory, turnCount }),
+      signal: talkAbortController.signal
     });
 
     const reader = res.body.getReader();
@@ -1100,7 +1113,7 @@ async function speakBotReply(text, onDone) {
   elements.talkStatus.textContent = 'Speaking...';
 
   // Prefer OpenAI TTS (nova voice) — sounds human; fall back to browser TTS
-  if (serverCapabilities.openAiConfigured) {
+  if (serverCapabilities.hasOpenAi) {
     try {
       // Use GET + audio.src so the browser streams and plays as chunks arrive
       const url = '/api/tts?text=' + encodeURIComponent(text);
