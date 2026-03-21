@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ellipsis Health MVP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="background-orb orb-one"></div>
+    <div class="background-orb orb-two"></div>
+    <main class="app-shell">
+      <section class="hero-card panel">
+        <div class="eyebrow">Ellipsis Health MVP</div>
+        <h1>Daily voice check-ins that surface emotional drift early.</h1>
+        <p class="hero-copy">
+          Record one 30-second note, blend vocal pacing with transcript sentiment, and flag
+          whether today feels stable, elevated, or worth closer attention.
+        </p>
+        <div class="hero-stats">
+          <article>
+            <span>30s</span>
+            <p>daily voice note</p>
+          </article>
+          <article>
+            <span>2</span>
+            <p>signal sources combined</p>
+          </article>
+          <article>
+            <span>7d</span>
+            <p>local emotional trendline</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="grid-layout">
+        <section class="panel recorder-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Step 1</p>
+              <h2>Capture today’s note</h2>
+            </div>
+            <div class="timer-pill" id="timerPill">00:30</div>
+          </div>
+
+          <div class="meter-wrap">
+            <div class="meter-bar">
+              <div class="meter-fill" id="meterFill"></div>
+            </div>
+            <p class="meter-caption" id="meterCaption">Microphone idle</p>
+          </div>
+
+          <div class="button-row">
+            <button id="startButton" class="primary-button">Start recording</button>
+            <button id="stopButton" class="ghost-button" disabled>Stop</button>
+          </div>
+
+          <audio id="playback" controls class="playback" hidden></audio>
+
+          <div class="support-copy">
+            Browser speech recognition will auto-fill your transcript when supported. If not,
+            type a short summary below.
+          </div>
+        </section>
+
+        <section class="panel transcript-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Step 2</p>
+              <h2>Review the transcript</h2>
+            </div>
+            <button id="clearTranscriptButton" class="mini-button">Clear</button>
+          </div>
+          <label class="field-label" for="transcriptInput">Transcript or summary</label>
+          <textarea
+            id="transcriptInput"
+            rows="8"
+            placeholder="Today I felt..."
+          ></textarea>
+          <div class="button-row compact-row">
+            <button id="analyzeButton" class="primary-button" disabled>Analyze check-in</button>
+            <span id="analysisStatus" class="status-text">Waiting for a recording</span>
+          </div>
+        </section>
+      </section>
+
+      <section class="grid-layout lower-grid">
+        <section class="panel results-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Step 3</p>
+              <h2>Combined emotional state</h2>
+            </div>
+            <span class="disclaimer-chip">Non-diagnostic</span>
+          </div>
+          <div id="resultEmpty" class="result-empty">
+            Run one analysis to generate today’s emotional-state card.
+          </div>
+          <div id="resultCard" class="result-card" hidden>
+            <div class="result-banner" id="resultBanner">Stable</div>
+            <h3 id="resultHeadline">Your signals look balanced today.</h3>
+            <p id="resultSummary"></p>
+            <div class="score-grid">
+              <article>
+                <span id="vocalScore">0</span>
+                <p>vocal signal score</p>
+              </article>
+              <article>
+                <span id="textScore">0</span>
+                <p>transcript sentiment</p>
+              </article>
+              <article>
+                <span id="paceScore">0 wpm</span>
+                <p>speaking pace</p>
+              </article>
+            </div>
+            <div class="detail-grid">
+              <article>
+                <h4>Vocal cues</h4>
+                <p id="vocalNarrative"></p>
+              </article>
+              <article>
+                <h4>Transcript read</h4>
+                <p id="textNarrative"></p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel history-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Trendline</p>
+              <h2>Recent check-ins</h2>
+            </div>
+            <span class="history-note">Stored locally in this browser</span>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
