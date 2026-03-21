@@ -441,9 +441,13 @@ async function analyzeEntry() {
   elements.analyzeButton.disabled = true;
 
   try {
-    const recordingAnalysis = serverCapabilities.openAiConfigured
-      ? await analyzeRecording(audioBlob, transcriptDraft, analysisMode)
-      : { transcript: transcriptDraft, textAnalysis: await analyzeTranscript(transcriptDraft, analysisMode) };
+    let recordingAnalysis;
+    if (serverCapabilities.openAiConfigured) {
+      recordingAnalysis = await analyzeRecording(audioBlob, transcriptDraft, analysisMode);
+    } else {
+      const { analysis, emotionDetection } = await analyzeTranscript(transcriptDraft, analysisMode);
+      recordingAnalysis = { transcript: transcriptDraft, textAnalysis: analysis, emotionDetection };
+    }
     const transcript = normalizeTranscript(recordingAnalysis.transcript || transcriptDraft);
 
     if (!transcript) {
@@ -477,12 +481,12 @@ async function analyzeTextOnly(transcript) {
   elements.analyzeButton.disabled = true;
 
   try {
-    const textAnalysis = await analyzeTranscript(transcript, analysisMode);
+    const { analysis: textAnalysis, emotionDetection } = await analyzeTranscript(transcript, analysisMode);
     const vocalMetrics = conversationVocalMetrics(transcript);
     const combined = combineSignals(vocalMetrics, textAnalysis);
 
     renderResult(combined, vocalMetrics, textAnalysis);
-    renderEmotionDetection(null);
+    renderEmotionDetection(emotionDetection);
     storeHistory(combined, vocalMetrics, textAnalysis, transcript, null);
     renderHistory();
     elements.analysisStatus.textContent = 'Analysis complete.';
@@ -521,7 +525,7 @@ async function analyzeTranscript(transcript, mode = ADVANCED_ANALYSIS) {
   }
 
   const payload = await response.json();
-  return normalizeAnalysisPayload(payload);
+  return { analysis: normalizeAnalysisPayload(payload), emotionDetection: payload.emotionDetection || null };
 }
 
 async function analyzeRecording(blob, transcriptDraft, mode = ADVANCED_ANALYSIS) {
