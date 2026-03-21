@@ -1,157 +1,185 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
+
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ellipsis Health MVP</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
     <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
+</head>
+
+<body>
     <div class="background-orb orb-one"></div>
     <div class="background-orb orb-two"></div>
     <main class="app-shell">
-      <section class="hero-card panel">
-        <div class="eyebrow">Ellipsis Health MVP</div>
-        <h1>Daily voice check-ins that surface emotional drift early.</h1>
-        <p class="hero-copy">
-          Record one 30-second note, blend vocal pacing with transcript sentiment, and flag
-          whether today feels stable, elevated, or worth closer attention.
-        </p>
-        <div class="hero-stats">
-          <article>
-            <span>30s</span>
-            <p>daily voice note</p>
-          </article>
-          <article>
-            <span>2</span>
-            <p>signal sources combined</p>
-          </article>
-          <article>
-            <span>7d</span>
-            <p>local emotional trendline</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="grid-layout">
-        <section class="panel recorder-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Step 1</p>
-              <h2>Capture today’s note</h2>
+        <section class="hero-card panel">
+            <div class="eyebrow">Ellipsis Health MVP</div>
+            <h1>Daily voice check-ins that surface emotional drift early.</h1>
+            <p class="hero-copy">
+                Record one 30-second note, blend vocal pacing with transcript sentiment, and flag
+                whether today feels stable, elevated, or worth closer attention.
+            </p>
+            <div class="hero-stats">
+                <article>
+                    <span>30s</span>
+                    <p>daily voice note</p>
+                </article>
+                <article>
+                    <span>2</span>
+                    <p>signal sources combined</p>
+                </article>
+                <article>
+                    <span>7d</span>
+                    <p>local emotional trendline</p>
+                </article>
             </div>
-            <div class="timer-pill" id="timerPill">00:30</div>
-          </div>
-
-          <div class="meter-wrap">
-            <div class="meter-bar">
-              <div class="meter-fill" id="meterFill"></div>
-            </div>
-            <p class="meter-caption" id="meterCaption">Microphone idle</p>
-          </div>
-
-          <div class="button-row">
-            <button id="startButton" class="primary-button">Start recording</button>
-            <button id="stopButton" class="ghost-button" disabled>Stop</button>
-          </div>
-
-          <audio id="playback" controls class="playback" hidden></audio>
-
-          <div class="support-copy">
-            After you stop recording, the app will transcribe the saved audio automatically.
-            Live browser speech recognition still runs when supported for a faster first draft.
-          </div>
         </section>
 
-        <section class="panel transcript-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Step 2</p>
-              <h2>Review the transcript</h2>
-            </div>
-            <div class="mini-button-row">
-              <button id="transcribeButton" class="mini-button" disabled>Transcribe recording</button>
-              <button id="clearTranscriptButton" class="mini-button">Clear</button>
-            </div>
-          </div>
-          <label class="field-label" for="transcriptInput">Transcript or summary</label>
-          <textarea
-            id="transcriptInput"
-            rows="8"
-            placeholder="Today I felt..."
-          ></textarea>
-          <div id="transcriptStatus" class="status-text transcript-status">
-            Record a note to generate a transcript.
-          </div>
-          <div class="button-row compact-row">
-            <button id="analyzeButton" class="primary-button" disabled>Analyze check-in</button>
-            <span id="analysisStatus" class="status-text">Waiting for a recording</span>
-          </div>
-        </section>
-      </section>
+        <section class="grid-layout">
+            <section class="panel recorder-panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">Step 1</p>
+                        <h2>Capture today's note</h2>
+                    </div>
+                    <div class="timer-pill" id="timerPill">00:30</div>
+                </div>
 
-      <section class="grid-layout lower-grid">
-        <section class="panel results-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Step 3</p>
-              <h2>Combined emotional state</h2>
-            </div>
-            <span class="disclaimer-chip">Non-diagnostic</span>
-          </div>
-          <div id="resultEmpty" class="result-empty">
-            Run one analysis to generate today’s emotional-state card.
-          </div>
-          <div id="resultCard" class="result-card" hidden>
-            <div class="result-banner" id="resultBanner">Stable</div>
-            <h3 id="resultHeadline">Your signals look balanced today.</h3>
-            <p id="resultSummary"></p>
-            <div class="score-grid">
-              <article>
-                <span id="vocalScore">0</span>
-                <p>vocal signal score</p>
-              </article>
-              <article>
-                <span id="textScore">0</span>
-                <p>transcript sentiment</p>
-              </article>
-              <article>
-                <span id="paceScore">0 wpm</span>
-                <p>speaking pace</p>
-              </article>
-            </div>
-            <div class="detail-grid">
-              <article>
-                <h4>Vocal cues</h4>
-                <p id="vocalNarrative"></p>
-              </article>
-              <article>
-                <h4>Transcript read</h4>
-                <p id="textNarrative"></p>
-              </article>
-            </div>
-          </div>
+                <div class="mode-toggle" role="tablist" aria-label="Capture mode">
+                    <button id="modeRecordButton" class="mode-button active" type="button" role="tab"
+                        aria-selected="true">
+                        Record
+                    </button>
+                    <button id="modeUploadButton" class="mode-button" type="button" role="tab" aria-selected="false">
+                        Upload
+                    </button>
+                </div>
+
+                <div id="speechWarning" class="warning-banner" hidden>
+                    Browser speech recognition is unavailable. Recordings still work, but type your transcript manually.
+                </div>
+
+                <div id="uploadInfo" class="warning-banner" hidden>
+                    Uploaded audio cannot be auto-transcribed in this MVP. Please add a transcript manually.
+                </div>
+
+                <div class="meter-wrap" id="recordingPanel">
+                    <div class="meter-bar">
+                        <div class="meter-fill" id="meterFill"></div>
+                    </div>
+                    <p class="meter-caption" id="meterCaption">Microphone idle</p>
+                </div>
+
+                <div class="button-row" id="recordingButtons">
+                    <button id="startButton" class="primary-button">Start recording</button>
+                    <button id="stopButton" class="ghost-button" disabled>Stop</button>
+                </div>
+
+                <div id="uploadPanel" class="upload-panel" hidden>
+                    <input id="audioUploadInput" type="file" accept="audio/*" hidden />
+                    <button id="chooseFileButton" class="ghost-button" type="button">Choose audio file</button>
+                    <div id="uploadDropZone" class="upload-drop-zone" tabindex="0" role="button"
+                        aria-label="Drop audio file here or click to choose">
+                        <svg class="upload-icon" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 3L7.5 7.5h3v6h3v-6h3L12 3zm-7 12v4h14v-4h2v6H3v-6h2z" />
+                        </svg>
+                        <p>Drag and drop an audio file here</p>
+                        <p class="upload-help">or click to browse</p>
+                    </div>
+                </div>
+
+                <audio id="playback" controls class="playback" hidden></audio>
+
+                <div class="support-copy">
+                    After you stop recording, the app can transcribe the saved audio automatically.
+                    Live browser speech recognition still runs when supported for a faster first draft.
+                </div>
+            </section>
+
+            <section class="panel transcript-panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">Step 2</p>
+                        <h2>Review the transcript</h2>
+                    </div>
+                    <div class="mini-button-row">
+                        <button id="transcribeButton" class="mini-button" disabled>Transcribe recording</button>
+                        <button id="clearTranscriptButton" class="mini-button">Clear</button>
+                    </div>
+                </div>
+                <label class="field-label" for="transcriptInput">Transcript or summary</label>
+                <textarea id="transcriptInput" rows="8" placeholder="Today I felt..."></textarea>
+                <div id="transcriptStatus" class="status-text transcript-status">
+                    Record a note to generate a transcript.
+                </div>
+                <div class="button-row compact-row">
+                    <button id="analyzeButton" class="primary-button" disabled>Analyze check-in</button>
+                    <span id="analysisStatus" class="status-text">Waiting for a recording</span>
+                </div>
+            </section>
         </section>
 
-        <section class="panel history-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Trendline</p>
-              <h2>Recent check-ins</h2>
-            </div>
-            <span class="history-note">Stored locally in this browser</span>
-          </div>
-          <div id="historyList" class="history-list"></div>
+        <section class="grid-layout lower-grid">
+            <section class="panel results-panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">Step 3</p>
+                        <h2>Combined emotional state</h2>
+                    </div>
+                    <span class="disclaimer-chip">Non-diagnostic</span>
+                </div>
+                <div id="resultEmpty" class="result-empty">
+                    Run one analysis to generate today's emotional-state card.
+                </div>
+                <div id="resultCard" class="result-card" hidden>
+                    <div class="result-banner" id="resultBanner">Stable</div>
+                    <h3 id="resultHeadline">Your signals look balanced today.</h3>
+                    <p id="resultSummary"></p>
+                    <div class="score-grid">
+                        <article>
+                            <span id="vocalScore">0</span>
+                            <p>vocal signal score</p>
+                        </article>
+                        <article>
+                            <span id="textScore">0</span>
+                            <p>transcript sentiment</p>
+                        </article>
+                        <article>
+                            <span id="paceScore">0 wpm</span>
+                            <p>speaking pace</p>
+                        </article>
+                    </div>
+                    <div class="detail-grid">
+                        <article>
+                            <h4>Vocal cues</h4>
+                            <p id="vocalNarrative"></p>
+                        </article>
+                        <article>
+                            <h4>Transcript read</h4>
+                            <p id="textNarrative"></p>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel history-panel">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">Trendline</p>
+                        <h2>Recent check-ins</h2>
+                    </div>
+                    <span class="history-note">Stored locally in this browser</span>
+                </div>
+                <div class="sparkline-wrap" id="sparklineWrap" hidden>
+                    <svg id="historySparkline" class="sparkline" viewBox="0 0 320 80" preserveAspectRatio="none"></svg>
+                </div>
+                <div id="historyNudge" class="history-nudge" hidden></div>
+                <div id="historyList" class="history-list"></div>
+            </section>
         </section>
-      </section>
     </main>
 
     <script type="module" src="/app.js"></script>
-  </body>
+</body>
+
 </html>

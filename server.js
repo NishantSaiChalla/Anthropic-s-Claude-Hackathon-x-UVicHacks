@@ -10,9 +10,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+const anthropicApiKey = String(process.env.ANTHROPIC_API_KEY || '').trim();
 const anthropicModel = process.env.ANTHROPIC_MODEL || 'claude-3-7-sonnet-latest';
-const anthropic = anthropicApiKey ? new Anthropic({ apiKey: anthropicApiKey }) : null;
+const anthropic = isConfiguredAnthropicKey(anthropicApiKey)
+  ? new Anthropic({ apiKey: anthropicApiKey })
+  : null;
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -36,7 +38,7 @@ app.post('/api/analyze-text', async (request, response) => {
 
     response.json({
       ...analysis,
-      model: anthropic ? anthropicModel : 'local-heuristic',
+      model: analysis.source === 'claude' ? anthropicModel : 'local-heuristic',
       analyzedAt: new Date().toISOString()
     });
   } catch (error) {
@@ -157,7 +159,15 @@ async function analyzeTranscriptWithClaude(transcript) {
     .join('')
     .trim();
 
-  const parsed = JSON.parse(stripJsonEnvelope(text));
+  let parsed;
+  try {
+    parsed = JSON.parse(stripJsonEnvelope(text));
+  } catch {
+    return {
+      ...analyzeTranscriptHeuristically(transcript),
+      source: 'heuristic'
+    };
+  }
 
   return {
     source: 'claude',
@@ -189,4 +199,14 @@ function clampNumber(value, min, max) {
   }
 
   return Math.max(min, Math.min(max, Number(parsed.toFixed(2))));
+}
+
+function isConfiguredAnthropicKey(key) {
+  if (!key) {
+    return false;
+  }
+
+  const normalized = key.toLowerCase();
+  const placeholders = new Set(['your_api_key_here', 'your-api-key-here', 'changeme']);
+  return !placeholders.has(normalized);
 }
