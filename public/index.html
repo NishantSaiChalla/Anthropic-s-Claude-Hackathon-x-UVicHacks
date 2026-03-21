@@ -64,8 +64,8 @@
           <audio id="playback" controls class="playback" hidden></audio>
 
           <div class="support-copy">
-            Browser speech recognition will auto-fill your transcript when supported. If not,
-            type a short summary below.
+            After you stop recording, the app will transcribe the saved audio automatically.
+            Live browser speech recognition still runs when supported for a faster first draft.
           </div>
         </section>
 
@@ -75,7 +75,10 @@
               <p class="eyebrow">Step 2</p>
               <h2>Review the transcript</h2>
             </div>
-            <button id="clearTranscriptButton" class="mini-button">Clear</button>
+            <div class="mini-button-row">
+              <button id="transcribeButton" class="mini-button" disabled>Transcribe recording</button>
+              <button id="clearTranscriptButton" class="mini-button">Clear</button>
+            </div>
           </div>
           <label class="field-label" for="transcriptInput">Transcript or summary</label>
           <textarea
@@ -83,6 +86,9 @@
             rows="8"
             placeholder="Today I felt..."
           ></textarea>
+          <div id="transcriptStatus" class="status-text transcript-status">
+            Record a note to generate a transcript.
+          </div>
           <div class="button-row compact-row">
             <button id="analyzeButton" class="primary-button" disabled>Analyze check-in</button>
             <span id="analysisStatus" class="status-text">Waiting for a recording</span>
@@ -146,6 +152,6 @@
       </section>
     </main>
 
-    <script src="/app.js" defer></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

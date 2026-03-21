@@ -165,6 +165,13 @@ textarea {
   margin-bottom: 1.2rem;
 }
 
+.mini-button-row {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .timer-pill,
 .disclaimer-chip,
 .history-note,
@@ -263,6 +270,11 @@ textarea {
   display: inline-block;
   margin-bottom: 0.65rem;
   color: var(--ink-soft);
+}
+
+.transcript-status {
+  display: block;
+  margin-top: 0.75rem;
 }
 
 textarea {
@@ -412,5 +424,10 @@ textarea:focus {
 
   .section-heading {
     flex-direction: column;
+  }
+
+  .mini-button-row {
+    width: 100%;
+    justify-content: flex-start;
   }
 }

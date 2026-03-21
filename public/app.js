@@ -1,12 +1,19 @@
+import { env, pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+env.allowLocalModels = false;
+env.useBrowserCache = true;
+
 const RECORDING_LIMIT_SECONDS = 30;
 const HISTORY_KEY = 'ellipsis-health-history';
 
 const elements = {
   startButton: document.querySelector('#startButton'),
   stopButton: document.querySelector('#stopButton'),
+  transcribeButton: document.querySelector('#transcribeButton'),
   analyzeButton: document.querySelector('#analyzeButton'),
   clearTranscriptButton: document.querySelector('#clearTranscriptButton'),
   transcriptInput: document.querySelector('#transcriptInput'),
+  transcriptStatus: document.querySelector('#transcriptStatus'),
   analysisStatus: document.querySelector('#analysisStatus'),
   timerPill: document.querySelector('#timerPill'),
   meterFill: document.querySelector('#meterFill'),
@@ -37,6 +44,9 @@ let finalTranscript = '';
 let audioContext = null;
 let analyser = null;
 let sourceNode = null;
+let transcriberPromise = null;
+let isTranscribing = false;
+let hasRecordedTranscription = false;
 
 renderHistory();
 wireEvents();
@@ -44,10 +54,14 @@ wireEvents();
 function wireEvents() {
   elements.startButton.addEventListener('click', startRecording);
   elements.stopButton.addEventListener('click', stopRecording);
+  elements.transcribeButton.addEventListener('click', () => {
+    transcribeRecording({ forceRefresh: true });
+  });
   elements.analyzeButton.addEventListener('click', analyzeEntry);
   elements.clearTranscriptButton.addEventListener('click', () => {
     finalTranscript = '';
     elements.transcriptInput.value = '';
+    setTranscriptStatus('Transcript cleared. Re-transcribe or type a summary.');
   });
 }
 
@@ -55,9 +69,14 @@ async function startRecording() {
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
+    audioBlob = null;
     finalTranscript = '';
+    hasRecordedTranscription = false;
     secondsRemaining = RECORDING_LIMIT_SECONDS;
     updateTimer();
+    elements.transcriptInput.value = '';
+    elements.transcribeButton.disabled = true;
+    setTranscriptStatus('Recording started. Transcript will generate after you stop.');
 
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType: getSupportedMimeType() });
     mediaRecorder.addEventListener('dataavailable', (event) => {
@@ -106,12 +125,13 @@ function stopRecording() {
   elements.meterCaption.textContent = 'Recording complete';
 }
 
-function finalizeRecording() {
+async function finalizeRecording() {
   audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
   elements.playback.src = URL.createObjectURL(audioBlob);
   elements.playback.hidden = false;
   elements.analyzeButton.disabled = false;
-  elements.analysisStatus.textContent = 'Ready to analyze.';
+  elements.transcribeButton.disabled = false;
+  elements.analysisStatus.textContent = 'Audio ready. Preparing transcript...';
 
   if (finalTranscript.trim() && !elements.transcriptInput.value.trim()) {
     elements.transcriptInput.value = finalTranscript.trim();
@@ -121,6 +141,8 @@ function finalizeRecording() {
     mediaStream.getTracks().forEach((track) => track.stop());
     mediaStream = null;
   }
+
+  await transcribeRecording();
 }
 
 async function analyzeEntry() {
@@ -376,7 +398,7 @@ function stopLevelMeter() {
 function startSpeechRecognition() {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
-    elements.analysisStatus.textContent = 'Recording in progress. Browser transcript unavailable, type a summary after.';
+    setTranscriptStatus('Live browser transcript is unavailable here. The saved recording will still be transcribed after capture.');
     return;
   }
 
@@ -393,10 +415,11 @@ function startSpeechRecognition() {
 
     finalTranscript = transcript;
     elements.transcriptInput.value = transcript;
+    setTranscriptStatus('Live transcript updated. Final recording transcription will refine it after capture.');
   };
 
   recognition.onerror = () => {
-    elements.analysisStatus.textContent = 'Recording in progress. Transcript capture had an issue; you can type it manually.';
+    setTranscriptStatus('Live transcript capture had an issue. The saved recording will still be transcribed after capture.');
   };
 
   recognition.start();
@@ -470,4 +493,133 @@ function formatDate(isoDate) {
     hour: 'numeric',
     minute: '2-digit'
   }).format(new Date(isoDate));
+}
+
+async function transcribeRecording({ forceRefresh = false } = {}) {
+  if (!audioBlob || isTranscribing) {
+    return;
+  }
+
+  if (!forceRefresh && hasRecordedTranscription) {
+    setTranscriptStatus('Transcript captured. Edit it if needed before analysis.');
+    elements.analysisStatus.textContent = 'Ready to analyze.';
+    return;
+  }
+
+  isTranscribing = true;
+  elements.transcribeButton.disabled = true;
+  setTranscriptStatus('Transcribing saved recording...');
+
+  try {
+    const audio = await decodeAudioForTranscription(audioBlob);
+    const transcriber = await getTranscriber();
+    const result = await transcriber(audio, {
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      return_timestamps: false,
+      language: 'english',
+      task: 'transcribe'
+    });
+
+    const transcript = normalizeTranscript(result?.text || '');
+    if (!transcript) {
+      throw new Error('No transcript returned from speech model.');
+    }
+
+    finalTranscript = transcript;
+    hasRecordedTranscription = true;
+    elements.transcriptInput.value = transcript;
+    setTranscriptStatus('Saved recording transcribed successfully.');
+    elements.analysisStatus.textContent = 'Ready to analyze.';
+  } catch (error) {
+    console.error(error);
+    if (forceRefresh) {
+      hasRecordedTranscription = false;
+    }
+    if (elements.transcriptInput.value.trim()) {
+      setTranscriptStatus('Automatic transcription had an issue. You can keep editing the live transcript draft.');
+      elements.analysisStatus.textContent = 'Ready to analyze.';
+    } else {
+      setTranscriptStatus('Automatic transcription failed. Type a short summary manually, or try transcribing again.');
+      elements.analysisStatus.textContent = 'Transcript required before analysis.';
+    }
+  } finally {
+    isTranscribing = false;
+    elements.transcribeButton.disabled = !audioBlob;
+  }
+}
+
+async function getTranscriber() {
+  if (!transcriberPromise) {
+    setTranscriptStatus('Loading speech model for first-time transcription...');
+    transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en').catch((error) => {
+      transcriberPromise = null;
+      throw error;
+    });
+  }
+
+  return transcriberPromise;
+}
+
+async function decodeAudioForTranscription(blob) {
+  const arrayBuffer = await blob.arrayBuffer();
+  const decodeContext = new AudioContext();
+
+  try {
+    const decoded = await decodeContext.decodeAudioData(arrayBuffer);
+    const mono = downmixToMono(decoded);
+    return resampleAudio(mono, decoded.sampleRate, 16000);
+  } finally {
+    await decodeContext.close();
+  }
+}
+
+function downmixToMono(audioBuffer) {
+  if (audioBuffer.numberOfChannels === 1) {
+    return audioBuffer.getChannelData(0);
+  }
+
+  const mono = new Float32Array(audioBuffer.length);
+  for (let channelIndex = 0; channelIndex < audioBuffer.numberOfChannels; channelIndex += 1) {
+    const channelData = audioBuffer.getChannelData(channelIndex);
+    for (let sampleIndex = 0; sampleIndex < audioBuffer.length; sampleIndex += 1) {
+      mono[sampleIndex] += channelData[sampleIndex] / audioBuffer.numberOfChannels;
+    }
+  }
+
+  return mono;
+}
+
+function resampleAudio(input, inputSampleRate, targetSampleRate) {
+  if (inputSampleRate === targetSampleRate) {
+    return input;
+  }
+
+  const ratio = inputSampleRate / targetSampleRate;
+  const newLength = Math.round(input.length / ratio);
+  const output = new Float32Array(newLength);
+
+  for (let index = 0; index < newLength; index += 1) {
+    const start = Math.floor(index * ratio);
+    const end = Math.min(input.length, Math.floor((index + 1) * ratio));
+    let sum = 0;
+    let count = 0;
+
+    for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+      sum += input[sampleIndex];
+      count += 1;
+    }
+
+    output[index] = count ? sum / count : input[start] || 0;
+  }
+
+  return output;
+}
+
+function normalizeTranscript(text) {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function setTranscriptStatus(message) {
+  elements.transcriptStatus.textContent = message;
 }
