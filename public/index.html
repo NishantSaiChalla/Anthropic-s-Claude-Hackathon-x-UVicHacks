@@ -50,6 +50,9 @@
             <button id="modeUploadButton" class="mode-button" type="button" role="tab" aria-selected="false">
               Upload Recording
             </button>
+            <button id="modeTalkButton" class="mode-button" type="button" role="tab" aria-selected="false">
+              Talk
+            </button>
           </div>
 
           <div id="speechWarning" class="warning-banner" hidden>
@@ -85,6 +88,15 @@
           </div>
 
           <video id="playback" controls class="playback" hidden></video>
+
+          <div id="talkPanel" class="talk-panel" hidden>
+            <div id="conversationList" class="conversation-list"></div>
+            <p id="talkStatus" class="talk-status"></p>
+            <div class="talk-controls">
+              <button id="talkMicButton" class="talk-mic-button" type="button" disabled>Tap to speak</button>
+              <button id="endTalkButton" class="end-talk-button ghost-button" type="button" disabled>End &amp; analyze</button>
+            </div>
+          </div>
 
           <div class="support-copy">
             Record or upload audio, then send it to GPT for transcription, emotional feedback, and practical wellness tips.

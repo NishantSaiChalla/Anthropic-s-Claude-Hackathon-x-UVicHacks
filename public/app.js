@@ -4,6 +4,7 @@ const SPEECH_WARNING_MESSAGE = 'Browser speech recognition is unavailable. Recor
 
 const RECORDING_MODE = 'record';
 const UPLOAD_MODE = 'upload';
+const TALK_MODE = 'talk';
 const BASIC_ANALYSIS = 'basic';
 const ADVANCED_ANALYSIS = 'advanced';
 const DIRECT_ANALYSIS = 'direct';
@@ -58,7 +59,13 @@ const elements = {
   streakCounter: document.querySelector('#streakCounter'),
   streakNumber: document.querySelector('#streakNumber'),
   restDayButton: document.querySelector('#restDayButton'),
-  resetTrendlineButton: document.querySelector('#resetTrendlineButton')
+  resetTrendlineButton: document.querySelector('#resetTrendlineButton'),
+  modeTalkButton: document.querySelector('#modeTalkButton'),
+  talkPanel: document.querySelector('#talkPanel'),
+  conversationList: document.querySelector('#conversationList'),
+  talkStatus: document.querySelector('#talkStatus'),
+  talkMicButton: document.querySelector('#talkMicButton'),
+  endTalkButton: document.querySelector('#endTalkButton')
 };
 
 let mediaRecorder = null;
@@ -81,12 +88,18 @@ let captureMode = RECORDING_MODE;
 let analysisMode = ADVANCED_ANALYSIS;
 let serverCapabilities = {
   openAiConfigured: false,
-  anthropicConfigured: false,
   huggingFaceConfigured: false,
   huggingFaceModel: null,
   analysisModel: 'local-heuristic',
   transcriptionModel: null
 };
+
+// Talk mode state
+let conversationHistory = [];
+let talkRecognition = null;
+let talkAudio = null;
+let isBotSpeaking = false;
+let isTalkListening = false;
 
 boot();
 
@@ -104,6 +117,9 @@ function wireEvents() {
   });
   elements.modeRecordButton.addEventListener('click', () => setCaptureMode(RECORDING_MODE));
   elements.modeUploadButton.addEventListener('click', () => setCaptureMode(UPLOAD_MODE));
+  elements.modeTalkButton.addEventListener('click', () => setCaptureMode(TALK_MODE));
+  elements.talkMicButton.addEventListener('click', startUserListening);
+  elements.endTalkButton.addEventListener('click', endTalkSession);
   elements.analysisBasicButton.addEventListener('click', () => setAnalysisMode(BASIC_ANALYSIS));
   elements.analysisAdvancedButton.addEventListener('click', () => setAnalysisMode(ADVANCED_ANALYSIS));
   elements.analysisDirectButton.addEventListener('click', () => setAnalysisMode(DIRECT_ANALYSIS));
@@ -128,6 +144,8 @@ function wireEvents() {
 }
 
 function setCaptureMode(mode) {
+  const leavingTalk = captureMode === TALK_MODE && mode !== TALK_MODE;
+
   if (captureMode === mode) {
     return;
   }
@@ -135,20 +153,30 @@ function setCaptureMode(mode) {
   captureMode = mode;
   const usingRecord = captureMode === RECORDING_MODE;
   const usingUpload = captureMode === UPLOAD_MODE;
+  const usingTalk = captureMode === TALK_MODE;
 
   elements.modeRecordButton.classList.toggle('active', usingRecord);
   elements.modeRecordButton.setAttribute('aria-selected', String(usingRecord));
   elements.modeUploadButton.classList.toggle('active', usingUpload);
   elements.modeUploadButton.setAttribute('aria-selected', String(usingUpload));
+  elements.modeTalkButton.classList.toggle('active', usingTalk);
+  elements.modeTalkButton.setAttribute('aria-selected', String(usingTalk));
 
   elements.recordingPanel.hidden = !usingRecord;
   elements.recordingButtons.hidden = !usingRecord;
   elements.uploadPanel.hidden = !usingUpload;
+  elements.talkPanel.hidden = !usingTalk;
 
-  if (!usingRecord) {
+  if (leavingTalk) {
+    leaveTalkMode();
+  }
+
+  if (usingTalk) {
+    enterTalkMode();
+  } else if (!usingRecord) {
     stopRecording();
     updateTimer(RECORDING_LIMIT_SECONDS);
-    elements.meterCaption.textContent = 'Upload mode ready';
+    if (usingUpload) elements.meterCaption.textContent = 'Upload mode ready';
   } else if (!audioBlob) {
     elements.meterCaption.textContent = 'Microphone idle';
   }
@@ -385,12 +413,18 @@ async function finalizeRecording(blobOverride, options = {}) {
 }
 
 async function analyzeEntry() {
+  const transcriptDraft = elements.transcriptInput.value.trim();
+
+  // Talk mode: no audio blob, but transcript loaded from conversation
+  if (!audioBlob && transcriptDraft) {
+    await analyzeTextOnly(transcriptDraft);
+    return;
+  }
+
   if (!audioBlob) {
     elements.analysisStatus.textContent = 'Record or upload audio before analyzing.';
     return;
   }
-
-  const transcriptDraft = elements.transcriptInput.value.trim();
 
   if (!serverCapabilities.openAiConfigured && !transcriptDraft) {
     elements.analysisStatus.textContent = 'Add a transcript or summary to continue.';
@@ -436,6 +470,40 @@ async function analyzeEntry() {
   } finally {
     elements.analyzeButton.disabled = false;
   }
+}
+
+async function analyzeTextOnly(transcript) {
+  elements.analysisStatus.textContent = 'Analyzing conversation transcript...';
+  elements.analyzeButton.disabled = true;
+
+  try {
+    const textAnalysis = await analyzeTranscript(transcript, analysisMode);
+    const vocalMetrics = conversationVocalMetrics(transcript);
+    const combined = combineSignals(vocalMetrics, textAnalysis);
+
+    renderResult(combined, vocalMetrics, textAnalysis);
+    renderEmotionDetection(null);
+    storeHistory(combined, vocalMetrics, textAnalysis, transcript, null);
+    renderHistory();
+    elements.analysisStatus.textContent = 'Analysis complete.';
+  } catch (error) {
+    console.error(error);
+    elements.analysisStatus.textContent = `Analysis failed: ${error.message}`;
+  } finally {
+    elements.analyzeButton.disabled = false;
+  }
+}
+
+function conversationVocalMetrics(transcript) {
+  const words = transcript.trim().split(/\s+/).filter(Boolean).length;
+  return {
+    vocalScore: 0,
+    wordsPerMinute: words,
+    energyVariance: 'n/a',
+    silenceRatio: 'n/a',
+    vocalLabel: 'not measured',
+    pacingLabel: 'not measured'
+  };
 }
 
 async function analyzeTranscript(transcript, mode = ADVANCED_ANALYSIS) {
@@ -541,8 +609,9 @@ function combineSignals(vocalMetrics, textAnalysis) {
   }[textAnalysis.concernLevel] || 0;
 
   const textWeight = textAnalysis.sentimentScore < -0.4 ? 1.5 : textAnalysis.sentimentScore < -0.15 ? 0.8 : 0;
-  const vocalWeight = vocalMetrics.vocalScore > 2.3 ? 1.4 : vocalMetrics.vocalScore > 1.2 ? 0.8 : 0;
-  const pacingWeight = vocalMetrics.wordsPerMinute > 175 || vocalMetrics.wordsPerMinute < 85 ? 0.8 : 0;
+  const isVocalMeasured = vocalMetrics.vocalLabel !== 'not measured';
+  const vocalWeight = isVocalMeasured ? (vocalMetrics.vocalScore > 2.3 ? 1.4 : vocalMetrics.vocalScore > 1.2 ? 0.8 : 0) : 0;
+  const pacingWeight = isVocalMeasured ? (vocalMetrics.wordsPerMinute > 175 || vocalMetrics.wordsPerMinute < 85 ? 0.8 : 0) : 0;
   const combinedScore = Number((concernWeight + textWeight + vocalWeight + pacingWeight).toFixed(2));
 
   let level = 'stable';
@@ -556,8 +625,11 @@ function combineSignals(vocalMetrics, textAnalysis) {
     headline = 'There are some emotional signals worth tracking.';
   }
 
+  const isVocalMeasuredSummary = vocalMetrics.vocalLabel !== 'not measured';
   const summary = [
-    `Vocal delivery sounded ${vocalMetrics.vocalLabel} with ${vocalMetrics.pacingLabel} pacing.`,
+    isVocalMeasuredSummary
+      ? `Vocal delivery sounded ${vocalMetrics.vocalLabel} with ${vocalMetrics.pacingLabel} pacing.`
+      : 'Conversation transcript analyzed without vocal audio.',
     `Transcript analysis suggested ${textAnalysis.emotionalState} cues at a ${textAnalysis.concernLevel} concern level.`
   ].join(' ');
 
@@ -581,14 +653,17 @@ function renderResult(combined, vocalMetrics, textAnalysis) {
       : 'Stable';
   elements.resultHeadline.textContent = combined.headline;
   elements.resultSummary.textContent = combined.summary;
-  elements.vocalScore.textContent = vocalMetrics.vocalScore.toFixed(2);
+  const talkMode = vocalMetrics.vocalLabel === 'not measured';
+  elements.vocalScore.textContent = talkMode ? 'n/a' : vocalMetrics.vocalScore.toFixed(2);
   elements.textScore.textContent = normalizedAnalysis.sentimentScore.toFixed(2);
-  elements.paceScore.textContent = `${vocalMetrics.wordsPerMinute} wpm`;
-  elements.vocalNarrative.textContent = [
-    `Energy variance: ${vocalMetrics.energyVariance}.`,
-    `Silence ratio: ${vocalMetrics.silenceRatio}.`,
-    `Interpretation: ${vocalMetrics.vocalLabel}.`
-  ].join(' ');
+  elements.paceScore.textContent = talkMode ? 'n/a' : `${vocalMetrics.wordsPerMinute} wpm`;
+  elements.vocalNarrative.textContent = talkMode
+    ? 'Vocal analysis not available — conversation transcript was analyzed.'
+    : [
+        `Energy variance: ${vocalMetrics.energyVariance}.`,
+        `Silence ratio: ${vocalMetrics.silenceRatio}.`,
+        `Interpretation: ${vocalMetrics.vocalLabel}.`
+      ].join(' ');
   elements.textNarrative.textContent = `${normalizedAnalysis.rationale} ${normalizedAnalysis.supportiveMessage}`;
   elements.feedbackNarrative.textContent = normalizedAnalysis.feedback;
   renderTips(normalizedAnalysis.wellnessTips, vocalMetrics);
@@ -1524,6 +1599,9 @@ function normalizeTipList(tips) {
 }
 
 function buildVocalTip(vocalMetrics) {
+  if (vocalMetrics.vocalLabel === 'not measured') {
+    return null;
+  }
   if (vocalMetrics.wordsPerMinute > 175) {
     return 'Your pace ran fast. Try one slower breath before your next task.';
   }
