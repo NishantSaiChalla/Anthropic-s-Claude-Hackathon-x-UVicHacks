@@ -858,6 +858,187 @@ textarea:focus {
   color: var(--ink-soft);
 }
 
+/* ── Talk mode ───────────────────────────────────────────────── */
+
+.talk-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  height: 400px;
+}
+
+.talk-phase-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.talk-phase-pill {
+  font-size: 0.71rem;
+  font-family: 'Consolas', 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(95, 139, 126, 0.12);
+  color: var(--mint);
+  transition: background 400ms, color 400ms;
+}
+
+.talk-phase-pill[data-phase='wrapping'] {
+  background: rgba(207, 95, 60, 0.1);
+  color: var(--accent);
+}
+
+.talk-turn-count {
+  font-size: 0.71rem;
+  color: var(--ink-soft);
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.25rem 0.1rem;
+  scroll-behavior: smooth;
+}
+
+.chat-bubble {
+  max-width: 82%;
+  padding: 0.6rem 0.85rem;
+  border-radius: 18px;
+  font-size: 0.93rem;
+  line-height: 1.55;
+  animation: bubble-in 220ms ease;
+}
+
+.chat-bubble[data-role='bot'] {
+  align-self: flex-start;
+  background: rgba(95, 139, 126, 0.13);
+  color: var(--ink);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-bubble[data-role='user'] {
+  align-self: flex-end;
+  background: rgba(207, 95, 60, 0.11);
+  color: var(--ink);
+  border-bottom-right-radius: 4px;
+}
+
+/* Typing indicator */
+.chat-bubble.typing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0.75rem 1rem;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mint);
+  animation: dot-bounce 1.3s ease-in-out infinite;
+}
+
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-7px); opacity: 1; }
+}
+
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Live interim transcript */
+.talk-live-transcript {
+  min-height: 1.3em;
+  font-size: 0.84rem;
+  color: var(--accent);
+  font-style: italic;
+  padding: 0 0.15rem;
+  opacity: 1;
+  transition: opacity 300ms;
+}
+
+.talk-live-transcript:empty {
+  opacity: 0;
+}
+
+/* Status line */
+.talk-status {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  text-align: center;
+  min-height: 1.1em;
+}
+
+/* Controls row */
+.talk-controls {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.talk-mic-button {
+  flex: 1;
+  padding: 0.68rem 1rem;
+  border-radius: 999px;
+  border: 2px solid var(--mint);
+  background: transparent;
+  color: var(--mint);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 200ms, color 200ms, box-shadow 200ms;
+}
+
+.talk-mic-button:hover:not(:disabled) {
+  background: rgba(95, 139, 126, 0.1);
+}
+
+.talk-mic-button.listening {
+  background: var(--mint);
+  color: #fff;
+  animation: mic-pulse 1.9s ease-in-out infinite;
+}
+
+.talk-mic-button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  animation: none;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(95, 139, 126, 0.4); }
+  50%       { box-shadow: 0 0 0 10px rgba(95, 139, 126, 0); }
+}
+
+/* Session complete notice inside conversation list */
+.talk-session-complete {
+  align-self: center;
+  margin-top: 0.4rem;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  background: rgba(95, 139, 126, 0.1);
+  color: var(--mint);
+  font-size: 0.82rem;
+  font-family: 'Consolas', 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  animation: bubble-in 300ms ease;
+}
+
 @keyframes rise-in {
   from {
     opacity: 0;

@@ -4,6 +4,7 @@ const SPEECH_WARNING_MESSAGE = 'Browser speech recognition is unavailable. Recor
 
 const RECORDING_MODE = 'record';
 const UPLOAD_MODE = 'upload';
+const TALK_MODE = 'talk';
 const BASIC_ANALYSIS = 'basic';
 const ADVANCED_ANALYSIS = 'advanced';
 const DIRECT_ANALYSIS = 'direct';
@@ -58,7 +59,16 @@ const elements = {
   streakCounter: document.querySelector('#streakCounter'),
   streakNumber: document.querySelector('#streakNumber'),
   restDayButton: document.querySelector('#restDayButton'),
-  resetTrendlineButton: document.querySelector('#resetTrendlineButton')
+  resetTrendlineButton: document.querySelector('#resetTrendlineButton'),
+  modeTalkButton: document.querySelector('#modeTalkButton'),
+  talkPanel: document.querySelector('#talkPanel'),
+  conversationList: document.querySelector('#conversationList'),
+  talkPhasePill: document.querySelector('#talkPhasePill'),
+  talkTurnCount: document.querySelector('#talkTurnCount'),
+  talkLiveTranscript: document.querySelector('#talkLiveTranscript'),
+  talkStatus: document.querySelector('#talkStatus'),
+  talkMicButton: document.querySelector('#talkMicButton'),
+  endTalkButton: document.querySelector('#endTalkButton')
 };
 
 let mediaRecorder = null;
@@ -81,12 +91,19 @@ let captureMode = RECORDING_MODE;
 let analysisMode = ADVANCED_ANALYSIS;
 let serverCapabilities = {
   openAiConfigured: false,
-  anthropicConfigured: false,
   huggingFaceConfigured: false,
   huggingFaceModel: null,
   analysisModel: 'local-heuristic',
   transcriptionModel: null
 };
+
+// Talk mode state
+let conversationHistory = [];
+let talkRecognition = null;
+let talkAudio = null;
+let isBotSpeaking = false;
+let isTalkListening = false;
+let pendingSessionComplete = false;
 
 boot();
 
@@ -104,6 +121,9 @@ function wireEvents() {
   });
   elements.modeRecordButton.addEventListener('click', () => setCaptureMode(RECORDING_MODE));
   elements.modeUploadButton.addEventListener('click', () => setCaptureMode(UPLOAD_MODE));
+  elements.modeTalkButton.addEventListener('click', () => setCaptureMode(TALK_MODE));
+  elements.talkMicButton.addEventListener('click', startUserListening);
+  elements.endTalkButton.addEventListener('click', endTalkSession);
   elements.analysisBasicButton.addEventListener('click', () => setAnalysisMode(BASIC_ANALYSIS));
   elements.analysisAdvancedButton.addEventListener('click', () => setAnalysisMode(ADVANCED_ANALYSIS));
   elements.analysisDirectButton.addEventListener('click', () => setAnalysisMode(DIRECT_ANALYSIS));
@@ -128,6 +148,8 @@ function wireEvents() {
 }
 
 function setCaptureMode(mode) {
+  const leavingTalk = captureMode === TALK_MODE && mode !== TALK_MODE;
+
   if (captureMode === mode) {
     return;
   }
@@ -135,20 +157,30 @@ function setCaptureMode(mode) {
   captureMode = mode;
   const usingRecord = captureMode === RECORDING_MODE;
   const usingUpload = captureMode === UPLOAD_MODE;
+  const usingTalk = captureMode === TALK_MODE;
 
   elements.modeRecordButton.classList.toggle('active', usingRecord);
   elements.modeRecordButton.setAttribute('aria-selected', String(usingRecord));
   elements.modeUploadButton.classList.toggle('active', usingUpload);
   elements.modeUploadButton.setAttribute('aria-selected', String(usingUpload));
+  elements.modeTalkButton.classList.toggle('active', usingTalk);
+  elements.modeTalkButton.setAttribute('aria-selected', String(usingTalk));
 
   elements.recordingPanel.hidden = !usingRecord;
   elements.recordingButtons.hidden = !usingRecord;
   elements.uploadPanel.hidden = !usingUpload;
+  elements.talkPanel.hidden = !usingTalk;
 
-  if (!usingRecord) {
+  if (leavingTalk) {
+    leaveTalkMode();
+  }
+
+  if (usingTalk) {
+    enterTalkMode();
+  } else if (!usingRecord) {
     stopRecording();
     updateTimer(RECORDING_LIMIT_SECONDS);
-    elements.meterCaption.textContent = 'Upload mode ready';
+    if (usingUpload) elements.meterCaption.textContent = 'Upload mode ready';
   } else if (!audioBlob) {
     elements.meterCaption.textContent = 'Microphone idle';
   }
@@ -385,12 +417,18 @@ async function finalizeRecording(blobOverride, options = {}) {
 }
 
 async function analyzeEntry() {
+  const transcriptDraft = elements.transcriptInput.value.trim();
+
+  // Talk mode: no audio blob, but transcript loaded from conversation
+  if (!audioBlob && transcriptDraft) {
+    await analyzeTextOnly(transcriptDraft);
+    return;
+  }
+
   if (!audioBlob) {
     elements.analysisStatus.textContent = 'Record or upload audio before analyzing.';
     return;
   }
-
-  const transcriptDraft = elements.transcriptInput.value.trim();
 
   if (!serverCapabilities.openAiConfigured && !transcriptDraft) {
     elements.analysisStatus.textContent = 'Add a transcript or summary to continue.';
@@ -436,6 +474,40 @@ async function analyzeEntry() {
   } finally {
     elements.analyzeButton.disabled = false;
   }
+}
+
+async function analyzeTextOnly(transcript) {
+  elements.analysisStatus.textContent = 'Analyzing conversation transcript...';
+  elements.analyzeButton.disabled = true;
+
+  try {
+    const textAnalysis = await analyzeTranscript(transcript, analysisMode);
+    const vocalMetrics = conversationVocalMetrics(transcript);
+    const combined = combineSignals(vocalMetrics, textAnalysis);
+
+    renderResult(combined, vocalMetrics, textAnalysis);
+    renderEmotionDetection(null);
+    storeHistory(combined, vocalMetrics, textAnalysis, transcript, null);
+    renderHistory();
+    elements.analysisStatus.textContent = 'Analysis complete.';
+  } catch (error) {
+    console.error(error);
+    elements.analysisStatus.textContent = `Analysis failed: ${error.message}`;
+  } finally {
+    elements.analyzeButton.disabled = false;
+  }
+}
+
+function conversationVocalMetrics(transcript) {
+  const words = transcript.trim().split(/\s+/).filter(Boolean).length;
+  return {
+    vocalScore: 0,
+    wordsPerMinute: words,
+    energyVariance: 'n/a',
+    silenceRatio: 'n/a',
+    vocalLabel: 'not measured',
+    pacingLabel: 'not measured'
+  };
 }
 
 async function analyzeTranscript(transcript, mode = ADVANCED_ANALYSIS) {
@@ -541,8 +613,9 @@ function combineSignals(vocalMetrics, textAnalysis) {
   }[textAnalysis.concernLevel] || 0;
 
   const textWeight = textAnalysis.sentimentScore < -0.4 ? 1.5 : textAnalysis.sentimentScore < -0.15 ? 0.8 : 0;
-  const vocalWeight = vocalMetrics.vocalScore > 2.3 ? 1.4 : vocalMetrics.vocalScore > 1.2 ? 0.8 : 0;
-  const pacingWeight = vocalMetrics.wordsPerMinute > 175 || vocalMetrics.wordsPerMinute < 85 ? 0.8 : 0;
+  const isVocalMeasured = vocalMetrics.vocalLabel !== 'not measured';
+  const vocalWeight = isVocalMeasured ? (vocalMetrics.vocalScore > 2.3 ? 1.4 : vocalMetrics.vocalScore > 1.2 ? 0.8 : 0) : 0;
+  const pacingWeight = isVocalMeasured ? (vocalMetrics.wordsPerMinute > 175 || vocalMetrics.wordsPerMinute < 85 ? 0.8 : 0) : 0;
   const combinedScore = Number((concernWeight + textWeight + vocalWeight + pacingWeight).toFixed(2));
 
   let level = 'stable';
@@ -556,8 +629,11 @@ function combineSignals(vocalMetrics, textAnalysis) {
     headline = 'There are some emotional signals worth tracking.';
   }
 
+  const isVocalMeasuredSummary = vocalMetrics.vocalLabel !== 'not measured';
   const summary = [
-    `Vocal delivery sounded ${vocalMetrics.vocalLabel} with ${vocalMetrics.pacingLabel} pacing.`,
+    isVocalMeasuredSummary
+      ? `Vocal delivery sounded ${vocalMetrics.vocalLabel} with ${vocalMetrics.pacingLabel} pacing.`
+      : 'Conversation transcript analyzed without vocal audio.',
     `Transcript analysis suggested ${textAnalysis.emotionalState} cues at a ${textAnalysis.concernLevel} concern level.`
   ].join(' ');
 
@@ -581,14 +657,17 @@ function renderResult(combined, vocalMetrics, textAnalysis) {
       : 'Stable';
   elements.resultHeadline.textContent = combined.headline;
   elements.resultSummary.textContent = combined.summary;
-  elements.vocalScore.textContent = vocalMetrics.vocalScore.toFixed(2);
+  const talkMode = vocalMetrics.vocalLabel === 'not measured';
+  elements.vocalScore.textContent = talkMode ? 'n/a' : vocalMetrics.vocalScore.toFixed(2);
   elements.textScore.textContent = normalizedAnalysis.sentimentScore.toFixed(2);
-  elements.paceScore.textContent = `${vocalMetrics.wordsPerMinute} wpm`;
-  elements.vocalNarrative.textContent = [
-    `Energy variance: ${vocalMetrics.energyVariance}.`,
-    `Silence ratio: ${vocalMetrics.silenceRatio}.`,
-    `Interpretation: ${vocalMetrics.vocalLabel}.`
-  ].join(' ');
+  elements.paceScore.textContent = talkMode ? 'n/a' : `${vocalMetrics.wordsPerMinute} wpm`;
+  elements.vocalNarrative.textContent = talkMode
+    ? 'Vocal analysis not available — conversation transcript was analyzed.'
+    : [
+        `Energy variance: ${vocalMetrics.energyVariance}.`,
+        `Silence ratio: ${vocalMetrics.silenceRatio}.`,
+        `Interpretation: ${vocalMetrics.vocalLabel}.`
+      ].join(' ');
   elements.textNarrative.textContent = `${normalizedAnalysis.rationale} ${normalizedAnalysis.supportiveMessage}`;
   elements.feedbackNarrative.textContent = normalizedAnalysis.feedback;
   renderTips(normalizedAnalysis.wellnessTips, vocalMetrics);
@@ -653,6 +732,544 @@ function resetTrendline() {
   localStorage.removeItem(HISTORY_KEY);
   renderHistory();
 }
+
+// ── Talk mode ─────────────────────────────────────────────────────────────────
+
+async function enterTalkMode() {
+  conversationHistory = [];
+  pendingSessionComplete = false;
+  elements.conversationList.innerHTML = '';
+  if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
+  elements.talkStatus.textContent = 'Starting your session…';
+  elements.talkMicButton.disabled = true;
+  elements.talkMicButton.textContent = 'Starting…';
+  elements.talkMicButton.classList.remove('listening');
+  elements.endTalkButton.disabled = false;
+  updateTalkPhase(0);
+
+  await sendUserGreeting();
+}
+
+function leaveTalkMode() {
+  if (talkRecognition) {
+    try { talkRecognition.abort(); } catch { /* ignore */ }
+    talkRecognition = null;
+  }
+  if (talkAudio) {
+    talkAudio.pause();
+    talkAudio = null;
+  }
+  window.speechSynthesis.cancel();
+  isBotSpeaking = false;
+  isTalkListening = false;
+  pendingSessionComplete = false;
+}
+
+function startUserListening() {
+  if (isBotSpeaking || isTalkListening || captureMode !== TALK_MODE || pendingSessionComplete) {
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    elements.talkStatus.textContent = 'Speech recognition unavailable in this browser.';
+    elements.talkMicButton.disabled = true;
+    return;
+  }
+
+  talkRecognition = new SpeechRecognition();
+  talkRecognition.lang = 'en-US';
+  talkRecognition.continuous = true;     // don't stop on first pause
+  talkRecognition.interimResults = true; // live partial results
+  talkRecognition.maxAlternatives = 1;
+
+  isTalkListening = true;
+  elements.talkMicButton.classList.add('listening');
+  elements.talkMicButton.textContent = 'Listening…';
+  elements.talkMicButton.disabled = false;
+  elements.talkStatus.textContent = 'Go ahead, I\'m listening…';
+  if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
+
+  let finalText = '';
+  let silenceTimer = null;
+  let hasSpoken = false;
+
+  // Two-tier silence detection:
+  //   — before speech begins: 8 s safety net (browser 'no-speech' usually fires first)
+  //   — after speech detected: 2.5 s pause = user is done with their thought
+  const INITIAL_WAIT    = 8000;
+  const SPEECH_PAUSE    = 2500;
+  // Give longer pause for longer utterances (the person is clearly sharing a lot)
+  function pauseDelay() {
+    const words = finalText.trim().split(/\s+/).length;
+    return words > 20 ? 3200 : SPEECH_PAUSE;
+  }
+
+  function resetSilenceTimer() {
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => {
+      if (talkRecognition) talkRecognition.stop();
+    }, hasSpoken ? pauseDelay() : INITIAL_WAIT);
+  }
+
+  talkRecognition.onresult = (event) => {
+    let interimText = '';
+    finalText = '';
+
+    for (let i = 0; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalText += t + ' ';
+      } else {
+        interimText += t;
+      }
+    }
+
+    finalText = finalText.trim();
+    const displayText = (finalText + (interimText ? ' ' + interimText : '')).trim();
+
+    if (displayText) {
+      hasSpoken = true;
+      // Show live words in the dedicated transcript preview
+      if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = displayText;
+      elements.talkStatus.textContent = '';
+    }
+
+    // Reset the post-speech silence timer on every new word
+    resetSilenceTimer();
+  };
+
+  talkRecognition.onend = () => {
+    clearTimeout(silenceTimer);
+    isTalkListening = false;
+    elements.talkMicButton.classList.remove('listening');
+    if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
+
+    const text = finalText.trim();
+    if (text) {
+      elements.talkMicButton.textContent = 'Processing…';
+      elements.talkMicButton.disabled = true;
+      elements.talkStatus.textContent = '';
+      sendUserTurn(text);
+    } else if (captureMode === TALK_MODE && !isBotSpeaking && !pendingSessionComplete) {
+      elements.talkStatus.textContent = 'Take your time — I\'m still here.';
+      setTimeout(() => {
+        if (captureMode === TALK_MODE && !isBotSpeaking && !pendingSessionComplete) {
+          startUserListening();
+        }
+      }, 1200);
+    }
+  };
+
+  talkRecognition.onerror = (event) => {
+    clearTimeout(silenceTimer);
+    isTalkListening = false;
+    elements.talkMicButton.classList.remove('listening');
+    if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
+
+    if (event.error === 'not-allowed') {
+      elements.talkStatus.textContent = 'Microphone access denied. Check browser permissions.';
+      elements.talkMicButton.textContent = 'Mic blocked';
+      elements.talkMicButton.disabled = true;
+    } else if (event.error === 'no-speech') {
+      elements.talkStatus.textContent = 'Take your time — I\'m still here.';
+      setTimeout(() => {
+        if (captureMode === TALK_MODE && !isBotSpeaking && !pendingSessionComplete) startUserListening();
+      }, 1000);
+    } else if (captureMode === TALK_MODE && !isBotSpeaking && !pendingSessionComplete) {
+      setTimeout(() => startUserListening(), 1000);
+    }
+  };
+
+  talkRecognition.start();
+  // Safety net: if no speech arrives within INITIAL_WAIT, stop and retry
+  resetSilenceTimer();
+}
+
+// Greeting — no user bubble, just stream the bot's opening line
+async function sendUserGreeting() {
+  updateTalkPhase(0);
+  const botBubble = appendTypingBubble();
+  let fullReply = '';
+  let streamDone = false;
+  let isPlayingAudio = false;
+  let localSessionComplete = false;
+  const audioQueue = [];
+
+  function onAllAudioDone() {
+    isBotSpeaking = false;
+    talkAudio = null;
+    if (localSessionComplete) {
+      completeSession();
+    } else if (captureMode === TALK_MODE) {
+      elements.talkMicButton.textContent = 'Listening…';
+      startUserListening();
+    }
+  }
+
+  function playNext() {
+    if (isPlayingAudio || audioQueue.length === 0) return;
+    isPlayingAudio = true;
+    const audio = audioQueue.shift();
+    audio.onended = () => {
+      isPlayingAudio = false;
+      if (audioQueue.length > 0) {
+        playNext();
+      } else if (streamDone) {
+        onAllAudioDone();
+      }
+    };
+    audio.onerror = () => {
+      isPlayingAudio = false;
+      if (audioQueue.length > 0) {
+        playNext();
+      } else if (streamDone) {
+        onAllAudioDone();
+      }
+    };
+    talkAudio = audio;
+    audio.play().catch(() => { isPlayingAudio = false; isBotSpeaking = false; });
+  }
+
+  try {
+    const res = await fetch('/api/chat-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [], turnCount: 0 })
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split('\n');
+      sseBuffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let data; try { data = JSON.parse(line.slice(6)); } catch { continue; }
+        if (data.sentence) {
+          fullReply += (fullReply ? ' ' : '') + data.sentence;
+          botBubble.classList.remove('typing');
+          botBubble.textContent = fullReply;
+          elements.conversationList.scrollTop = elements.conversationList.scrollHeight;
+          const url = '/api/tts?text=' + encodeURIComponent(data.sentence);
+          const audio = new Audio(url);
+          audioQueue.push(audio);
+          if (!isPlayingAudio) {
+            isBotSpeaking = true;
+            elements.talkMicButton.textContent = 'Therapist speaking…';
+            elements.talkStatus.textContent = '';
+            playNext();
+          }
+        }
+        if (data.done) {
+          streamDone = true;
+          localSessionComplete = Boolean(data.session_complete);
+          if (localSessionComplete) pendingSessionComplete = true;
+          conversationHistory.push({ role: 'assistant', content: fullReply });
+          if (!isPlayingAudio && audioQueue.length === 0) onAllAudioDone();
+        }
+      }
+    }
+  } catch {
+    botBubble.classList.remove('typing');
+    botBubble.textContent = 'Hi, I\'m really glad you\'re here. How are you feeling today?';
+    isBotSpeaking = false;
+    if (captureMode === TALK_MODE) startUserListening();
+  }
+}
+
+async function sendUserTurn(text) {
+  appendChatBubble('user', text);
+  conversationHistory.push({ role: 'user', content: text });
+
+  // Turn count = number of user messages so far (we just pushed one)
+  const turnCount = conversationHistory.filter((m) => m.role === 'user').length;
+  updateTalkPhase(turnCount);
+
+  elements.talkMicButton.disabled = true;
+  elements.talkMicButton.classList.remove('listening');
+  elements.talkMicButton.textContent = 'Thinking…';
+  elements.talkStatus.textContent = '';
+  if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
+
+  const botBubble = appendTypingBubble();
+  let fullReply = '';
+  const audioQueue = [];
+  let isPlayingAudio = false;
+  let streamDone = false;
+  let localSessionComplete = false;
+
+  function onAllAudioDone() {
+    isBotSpeaking = false;
+    talkAudio = null;
+    if (localSessionComplete) {
+      completeSession();
+    } else if (captureMode === TALK_MODE) {
+      elements.talkMicButton.textContent = 'Listening…';
+      startUserListening();
+    }
+  }
+
+  function playNext() {
+    if (isPlayingAudio || audioQueue.length === 0) return;
+    isPlayingAudio = true;
+    const audio = audioQueue.shift();
+
+    audio.onended = () => {
+      isPlayingAudio = false;
+      if (audioQueue.length > 0) {
+        playNext();
+      } else if (streamDone) {
+        onAllAudioDone();
+      }
+    };
+
+    audio.onerror = () => {
+      isPlayingAudio = false;
+      if (audioQueue.length > 0) {
+        playNext();
+      } else if (streamDone) {
+        onAllAudioDone();
+      }
+    };
+
+    talkAudio = audio;
+    audio.play().catch(() => { isPlayingAudio = false; isBotSpeaking = false; });
+  }
+
+  function queueSentence(sentence) {
+    const url = '/api/tts?text=' + encodeURIComponent(sentence);
+    const audio = new Audio(url);
+    audioQueue.push(audio);
+    if (!isPlayingAudio) {
+      isBotSpeaking = true;
+      elements.talkMicButton.textContent = 'Therapist speaking…';
+      elements.talkStatus.textContent = '';
+      playNext();
+    }
+  }
+
+  try {
+    const res = await fetch('/api/chat-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: conversationHistory, turnCount })
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split('\n');
+      sseBuffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let data;
+        try { data = JSON.parse(line.slice(6)); } catch { continue; }
+
+        if (data.sentence) {
+          fullReply += (fullReply ? ' ' : '') + data.sentence;
+          botBubble.classList.remove('typing');
+          botBubble.textContent = fullReply;
+          elements.conversationList.scrollTop = elements.conversationList.scrollHeight;
+          queueSentence(data.sentence);
+        }
+        if (data.done) {
+          streamDone = true;
+          localSessionComplete = Boolean(data.session_complete);
+          if (localSessionComplete) pendingSessionComplete = true;
+          conversationHistory.push({ role: 'assistant', content: fullReply });
+          if (!isPlayingAudio && audioQueue.length === 0) onAllAudioDone();
+        }
+      }
+    }
+  } catch {
+    botBubble.classList.remove('typing');
+    botBubble.textContent = 'I\'m right here with you. Take your time.';
+    streamDone = true;
+    isBotSpeaking = false;
+    if (captureMode === TALK_MODE && !pendingSessionComplete) startUserListening();
+  }
+}
+
+async function speakBotReply(text, onDone) {
+  // Stop anything currently playing
+  if (talkAudio) {
+    talkAudio.pause();
+    talkAudio = null;
+  }
+  window.speechSynthesis.cancel();
+
+  isBotSpeaking = true;
+  elements.talkMicButton.disabled = true;
+  elements.talkStatus.textContent = 'Speaking...';
+
+  // Prefer OpenAI TTS (nova voice) — sounds human; fall back to browser TTS
+  if (serverCapabilities.openAiConfigured) {
+    try {
+      // Use GET + audio.src so the browser streams and plays as chunks arrive
+      const url = '/api/tts?text=' + encodeURIComponent(text);
+      const audio = new Audio(url);
+      talkAudio = audio;
+
+      audio.onended = () => {
+        talkAudio = null;
+        isBotSpeaking = false;
+        onDone?.();
+      };
+
+      audio.onerror = () => {
+        talkAudio = null;
+        isBotSpeaking = false;
+        speakWithBrowserTTS(text, onDone);
+      };
+
+      await audio.play();
+      return;
+    } catch {
+      // Fall through to browser TTS
+    }
+  }
+
+  speakWithBrowserTTS(text, onDone);
+}
+
+function speakWithBrowserTTS(text, onDone) {
+  if (!window.speechSynthesis) {
+    isBotSpeaking = false;
+    onDone?.();
+    return;
+  }
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.9;
+  utterance.pitch = 1.05;
+
+  utterance.onend = () => {
+    isBotSpeaking = false;
+    onDone?.();
+  };
+
+  utterance.onerror = () => {
+    isBotSpeaking = false;
+    onDone?.();
+  };
+
+  window.speechSynthesis.speak(utterance);
+}
+
+function appendChatBubble(role, text) {
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble';
+  bubble.dataset.role = role;
+  bubble.textContent = text;
+  elements.conversationList.appendChild(bubble);
+  elements.conversationList.scrollTop = elements.conversationList.scrollHeight;
+  return bubble;
+}
+
+function appendTypingBubble() {
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble typing';
+  bubble.dataset.role = 'bot';
+  bubble.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+  elements.conversationList.appendChild(bubble);
+  elements.conversationList.scrollTop = elements.conversationList.scrollHeight;
+  return bubble;
+}
+
+function updateTalkPhase(turnCount) {
+  if (!elements.talkPhasePill) return;
+
+  let phase, label;
+  if (turnCount <= 1) {
+    phase = 'rapport'; label = 'Getting to know you';
+  } else if (turnCount <= 4) {
+    phase = 'exploring'; label = 'Exploring';
+  } else if (turnCount <= 7) {
+    phase = 'working'; label = 'Working through';
+  } else {
+    phase = 'wrapping'; label = 'Wrapping up';
+  }
+
+  elements.talkPhasePill.textContent = label;
+  elements.talkPhasePill.dataset.phase = phase;
+
+  if (elements.talkTurnCount) {
+    elements.talkTurnCount.textContent = turnCount > 0 ? `Turn ${turnCount}` : '';
+  }
+}
+
+function completeSession() {
+  isBotSpeaking = false;
+  talkAudio = null;
+  elements.talkMicButton.disabled = true;
+  elements.talkMicButton.textContent = 'Session complete';
+  elements.talkMicButton.classList.remove('listening');
+
+  if (elements.talkPhasePill) {
+    elements.talkPhasePill.textContent = 'Complete';
+    elements.talkPhasePill.dataset.phase = 'wrapping';
+  }
+
+  // Append a visual session-complete marker inside the conversation
+  const pill = document.createElement('div');
+  pill.className = 'talk-session-complete';
+  pill.textContent = 'Session complete';
+  elements.conversationList.appendChild(pill);
+  elements.conversationList.scrollTop = elements.conversationList.scrollHeight;
+
+  elements.talkStatus.textContent = 'Generating your emotional analysis…';
+  elements.endTalkButton.disabled = false;
+
+  // Auto-transition to analysis after a short pause
+  setTimeout(() => {
+    if (captureMode === TALK_MODE) endTalkSession();
+  }, 2800);
+}
+
+function endTalkSession() {
+  // Do NOT call leaveTalkMode() here — setCaptureMode handles it below
+  if (conversationHistory.length === 0) {
+    setCaptureMode(RECORDING_MODE);
+    return;
+  }
+
+  const transcript = conversationHistory
+    .map((m) => (m.role === 'user' ? 'Me: ' : 'Companion: ') + m.content)
+    .join('\n\n');
+
+  // Clear any prior audio so analyzeEntry routes to text-only path,
+  // not to the old recording from a previous Record/Upload session
+  audioBlob = null;
+  if (playbackUrl) {
+    URL.revokeObjectURL(playbackUrl);
+    playbackUrl = null;
+  }
+  elements.playback.hidden = true;
+  elements.playback.src = '';
+
+  elements.transcriptInput.value = transcript;
+  finalTranscript = transcript;
+  setTranscriptStatus('Conversation transcript loaded. Run analysis below.');
+  elements.analyzeButton.disabled = false;
+  elements.analysisStatus.textContent = 'Conversation ready to analyze.';
+
+  setCaptureMode(RECORDING_MODE); // calls leaveTalkMode internally
+
+  document.querySelector('.transcript-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── End talk mode ──────────────────────────────────────────────────────────────
 
 function todayDateKey() {
   return new Date().toLocaleDateString('en-CA');
@@ -1085,6 +1702,9 @@ function normalizeTipList(tips) {
 }
 
 function buildVocalTip(vocalMetrics) {
+  if (vocalMetrics.vocalLabel === 'not measured') {
+    return null;
+  }
   if (vocalMetrics.wordsPerMinute > 175) {
     return 'Your pace ran fast. Try one slower breath before your next task.';
   }
