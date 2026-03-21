@@ -37,11 +37,7 @@ const elements = {
   resultBanner: document.querySelector('#resultBanner'),
   resultHeadline: document.querySelector('#resultHeadline'),
   resultSummary: document.querySelector('#resultSummary'),
-  vocalScore: document.querySelector('#vocalScore'),
-  textScore: document.querySelector('#textScore'),
-  paceScore: document.querySelector('#paceScore'),
-  vocalNarrative: document.querySelector('#vocalNarrative'),
-  textNarrative: document.querySelector('#textNarrative'),
+
   feedbackNarrative: document.querySelector('#feedbackNarrative'),
   tipsList: document.querySelector('#tipsList'),
   emotionCard: document.querySelector('#emotionCard'),
@@ -623,18 +619,20 @@ function combineSignals(vocalMetrics, textAnalysis) {
 
   if (combinedScore >= 3.3) {
     level = 'high';
-    headline = 'Today shows multiple elevated emotional cues.';
+    headline = 'It sounds like today is a really tough day for you.';
   } else if (combinedScore >= 1.6) {
     level = 'elevated';
-    headline = 'There are some emotional signals worth tracking.';
+    headline = 'It sounds like you\'re carrying a bit of weight today.';
+  } else {
+    headline = 'It sounds like you\'re doing okay today.';
   }
 
   const isVocalMeasuredSummary = vocalMetrics.vocalLabel !== 'not measured';
   const summary = [
     isVocalMeasuredSummary
-      ? `Vocal delivery sounded ${vocalMetrics.vocalLabel} with ${vocalMetrics.pacingLabel} pacing.`
-      : 'Conversation transcript analyzed without vocal audio.',
-    `Transcript analysis suggested ${textAnalysis.emotionalState} cues at a ${textAnalysis.concernLevel} concern level.`
+      ? `Your voice sounded ${vocalMetrics.vocalLabel} with a ${vocalMetrics.pacingLabel} speaking pace.`
+      : 'I listened to what you wrote instead of your voice today.',
+    `Underneath it all, I'm hearing some ${textAnalysis.emotionalState} feelings.`
   ].join(' ');
 
   return {
@@ -651,24 +649,12 @@ function renderResult(combined, vocalMetrics, textAnalysis) {
   elements.resultCard.hidden = false;
   elements.resultCard.dataset.level = combined.level;
   elements.resultBanner.textContent = combined.level === 'high'
-    ? 'High attention'
+    ? 'Needs some TLC'
     : combined.level === 'elevated'
-      ? 'Elevated'
-      : 'Stable';
+      ? 'Checking in'
+      : 'Doing alright';
   elements.resultHeadline.textContent = combined.headline;
   elements.resultSummary.textContent = combined.summary;
-  const talkMode = vocalMetrics.vocalLabel === 'not measured';
-  elements.vocalScore.textContent = talkMode ? 'n/a' : vocalMetrics.vocalScore.toFixed(2);
-  elements.textScore.textContent = normalizedAnalysis.sentimentScore.toFixed(2);
-  elements.paceScore.textContent = talkMode ? 'n/a' : `${vocalMetrics.wordsPerMinute} wpm`;
-  elements.vocalNarrative.textContent = talkMode
-    ? 'Vocal analysis not available — conversation transcript was analyzed.'
-    : [
-        `Energy variance: ${vocalMetrics.energyVariance}.`,
-        `Silence ratio: ${vocalMetrics.silenceRatio}.`,
-        `Interpretation: ${vocalMetrics.vocalLabel}.`
-      ].join(' ');
-  elements.textNarrative.textContent = `${normalizedAnalysis.rationale} ${normalizedAnalysis.supportiveMessage}`;
   elements.feedbackNarrative.textContent = normalizedAnalysis.feedback;
   renderTips(normalizedAnalysis.wellnessTips, vocalMetrics);
 }
