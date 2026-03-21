@@ -63,6 +63,9 @@ const elements = {
   modeTalkButton: document.querySelector('#modeTalkButton'),
   talkPanel: document.querySelector('#talkPanel'),
   conversationList: document.querySelector('#conversationList'),
+  talkPhasePill: document.querySelector('#talkPhasePill'),
+  talkTurnCount: document.querySelector('#talkTurnCount'),
+  talkLiveTranscript: document.querySelector('#talkLiveTranscript'),
   talkStatus: document.querySelector('#talkStatus'),
   talkMicButton: document.querySelector('#talkMicButton'),
   endTalkButton: document.querySelector('#endTalkButton')
@@ -100,6 +103,7 @@ let talkRecognition = null;
 let talkAudio = null;
 let isBotSpeaking = false;
 let isTalkListening = false;
+let pendingSessionComplete = false;
 
 boot();
 
@@ -733,12 +737,16 @@ function resetTrendline() {
 
 async function enterTalkMode() {
   conversationHistory = [];
+  pendingSessionComplete = false;
   elements.conversationList.innerHTML = '';
-  elements.talkStatus.textContent = 'Starting your check-in...';
+  if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
+  elements.talkStatus.textContent = 'Starting your session…';
   elements.talkMicButton.disabled = true;
+  elements.talkMicButton.textContent = 'Starting…';
+  elements.talkMicButton.classList.remove('listening');
   elements.endTalkButton.disabled = false;
+  updateTalkPhase(0);
 
-  // Use the same streaming pipeline for the greeting
   await sendUserGreeting();
 }
 
@@ -754,43 +762,54 @@ function leaveTalkMode() {
   window.speechSynthesis.cancel();
   isBotSpeaking = false;
   isTalkListening = false;
+  pendingSessionComplete = false;
 }
 
 function startUserListening() {
-  if (isBotSpeaking || isTalkListening || captureMode !== TALK_MODE) {
+  if (isBotSpeaking || isTalkListening || captureMode !== TALK_MODE || pendingSessionComplete) {
     return;
   }
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    elements.talkStatus.textContent = 'Speech recognition unavailable in this browser. Type your reply and click End & analyze.';
+    elements.talkStatus.textContent = 'Speech recognition unavailable in this browser.';
     elements.talkMicButton.disabled = true;
     return;
   }
 
   talkRecognition = new SpeechRecognition();
   talkRecognition.lang = 'en-US';
-  talkRecognition.continuous = true;       // don't stop on first pause
-  talkRecognition.interimResults = true;   // get live partial results
+  talkRecognition.continuous = true;     // don't stop on first pause
+  talkRecognition.interimResults = true; // live partial results
   talkRecognition.maxAlternatives = 1;
 
   isTalkListening = true;
   elements.talkMicButton.classList.add('listening');
+  elements.talkMicButton.textContent = 'Listening…';
   elements.talkMicButton.disabled = false;
-  elements.talkStatus.textContent = 'Listening — speak freely...';
+  elements.talkStatus.textContent = 'Go ahead, I\'m listening…';
+  if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
 
   let finalText = '';
   let silenceTimer = null;
-  const SILENCE_DELAY = 1500; // ms of silence before we consider them done
+  let hasSpoken = false;
+
+  // Two-tier silence detection:
+  //   — before speech begins: 8 s safety net (browser 'no-speech' usually fires first)
+  //   — after speech detected: 2.5 s pause = user is done with their thought
+  const INITIAL_WAIT    = 8000;
+  const SPEECH_PAUSE    = 2500;
+  // Give longer pause for longer utterances (the person is clearly sharing a lot)
+  function pauseDelay() {
+    const words = finalText.trim().split(/\s+/).length;
+    return words > 20 ? 3200 : SPEECH_PAUSE;
+  }
 
   function resetSilenceTimer() {
     clearTimeout(silenceTimer);
     silenceTimer = setTimeout(() => {
-      // User paused long enough — send what we have
-      if (talkRecognition) {
-        talkRecognition.stop();
-      }
-    }, SILENCE_DELAY);
+      if (talkRecognition) talkRecognition.stop();
+    }, hasSpoken ? pauseDelay() : INITIAL_WAIT);
   }
 
   talkRecognition.onresult = (event) => {
@@ -798,23 +817,25 @@ function startUserListening() {
     finalText = '';
 
     for (let i = 0; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript;
+      const t = event.results[i][0].transcript;
       if (event.results[i].isFinal) {
-        finalText += transcript + ' ';
+        finalText += t + ' ';
       } else {
-        interimText += transcript;
+        interimText += t;
       }
     }
 
     finalText = finalText.trim();
-    const displayText = (finalText + ' ' + interimText).trim();
+    const displayText = (finalText + (interimText ? ' ' + interimText : '')).trim();
 
-    // Show live preview in status so user sees words forming
     if (displayText) {
-      elements.talkStatus.textContent = '🎙 ' + displayText;
+      hasSpoken = true;
+      // Show live words in the dedicated transcript preview
+      if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = displayText;
+      elements.talkStatus.textContent = '';
     }
 
-    // Reset silence timer on every new result (user is still talking)
+    // Reset the post-speech silence timer on every new word
     resetSilenceTimer();
   };
 
@@ -822,18 +843,21 @@ function startUserListening() {
     clearTimeout(silenceTimer);
     isTalkListening = false;
     elements.talkMicButton.classList.remove('listening');
+    if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
 
     const text = finalText.trim();
     if (text) {
-      elements.talkStatus.textContent = 'Thinking...';
+      elements.talkMicButton.textContent = 'Processing…';
+      elements.talkMicButton.disabled = true;
+      elements.talkStatus.textContent = '';
       sendUserTurn(text);
-    } else if (captureMode === TALK_MODE && !isBotSpeaking) {
-      elements.talkStatus.textContent = 'Take your time... still here.';
+    } else if (captureMode === TALK_MODE && !isBotSpeaking && !pendingSessionComplete) {
+      elements.talkStatus.textContent = 'Take your time — I\'m still here.';
       setTimeout(() => {
-        if (captureMode === TALK_MODE && !isBotSpeaking) {
+        if (captureMode === TALK_MODE && !isBotSpeaking && !pendingSessionComplete) {
           startUserListening();
         }
-      }, 1500);
+      }, 1200);
     }
   };
 
@@ -841,36 +865,47 @@ function startUserListening() {
     clearTimeout(silenceTimer);
     isTalkListening = false;
     elements.talkMicButton.classList.remove('listening');
+    if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
 
     if (event.error === 'not-allowed') {
       elements.talkStatus.textContent = 'Microphone access denied. Check browser permissions.';
+      elements.talkMicButton.textContent = 'Mic blocked';
       elements.talkMicButton.disabled = true;
     } else if (event.error === 'no-speech') {
-      // Silence — stay present and retry
-      elements.talkStatus.textContent = 'Take your time... still here.';
+      elements.talkStatus.textContent = 'Take your time — I\'m still here.';
       setTimeout(() => {
-        if (captureMode === TALK_MODE && !isBotSpeaking) {
-          startUserListening();
-        }
-      }, 1500);
-    } else if (captureMode === TALK_MODE && !isBotSpeaking) {
-      setTimeout(() => startUserListening(), 1200);
+        if (captureMode === TALK_MODE && !isBotSpeaking && !pendingSessionComplete) startUserListening();
+      }, 1000);
+    } else if (captureMode === TALK_MODE && !isBotSpeaking && !pendingSessionComplete) {
+      setTimeout(() => startUserListening(), 1000);
     }
   };
 
   talkRecognition.start();
-
-  // Start silence timer immediately so we don't hang forever if no speech detected
+  // Safety net: if no speech arrives within INITIAL_WAIT, stop and retry
   resetSilenceTimer();
 }
 
 // Greeting — no user bubble, just stream the bot's opening line
 async function sendUserGreeting() {
+  updateTalkPhase(0);
   const botBubble = appendTypingBubble();
   let fullReply = '';
   let streamDone = false;
   let isPlayingAudio = false;
+  let localSessionComplete = false;
   const audioQueue = [];
+
+  function onAllAudioDone() {
+    isBotSpeaking = false;
+    talkAudio = null;
+    if (localSessionComplete) {
+      completeSession();
+    } else if (captureMode === TALK_MODE) {
+      elements.talkMicButton.textContent = 'Listening…';
+      startUserListening();
+    }
+  }
 
   function playNext() {
     if (isPlayingAudio || audioQueue.length === 0) return;
@@ -881,12 +916,17 @@ async function sendUserGreeting() {
       if (audioQueue.length > 0) {
         playNext();
       } else if (streamDone) {
-        isBotSpeaking = false;
-        talkAudio = null;
-        if (captureMode === TALK_MODE) startUserListening();
+        onAllAudioDone();
       }
     };
-    audio.onerror = () => { isPlayingAudio = false; isBotSpeaking = false; };
+    audio.onerror = () => {
+      isPlayingAudio = false;
+      if (audioQueue.length > 0) {
+        playNext();
+      } else if (streamDone) {
+        onAllAudioDone();
+      }
+    };
     talkAudio = audio;
     audio.play().catch(() => { isPlayingAudio = false; isBotSpeaking = false; });
   }
@@ -895,7 +935,7 @@ async function sendUserGreeting() {
     const res = await fetch('/api/chat-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [] })
+      body: JSON.stringify({ messages: [], turnCount: 0 })
     });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -917,18 +957,25 @@ async function sendUserGreeting() {
           const url = '/api/tts?text=' + encodeURIComponent(data.sentence);
           const audio = new Audio(url);
           audioQueue.push(audio);
-          if (!isPlayingAudio) { isBotSpeaking = true; elements.talkStatus.textContent = 'Speaking...'; playNext(); }
+          if (!isPlayingAudio) {
+            isBotSpeaking = true;
+            elements.talkMicButton.textContent = 'Therapist speaking…';
+            elements.talkStatus.textContent = '';
+            playNext();
+          }
         }
         if (data.done) {
           streamDone = true;
+          localSessionComplete = Boolean(data.session_complete);
+          if (localSessionComplete) pendingSessionComplete = true;
           conversationHistory.push({ role: 'assistant', content: fullReply });
-          if (!isPlayingAudio && audioQueue.length === 0) { isBotSpeaking = false; if (captureMode === TALK_MODE) startUserListening(); }
+          if (!isPlayingAudio && audioQueue.length === 0) onAllAudioDone();
         }
       }
     }
   } catch {
     botBubble.classList.remove('typing');
-    botBubble.textContent = 'Hi, I\'m glad you\'re here. How are you feeling today?';
+    botBubble.textContent = 'Hi, I\'m really glad you\'re here. How are you feeling today?';
     isBotSpeaking = false;
     if (captureMode === TALK_MODE) startUserListening();
   }
@@ -938,17 +985,33 @@ async function sendUserTurn(text) {
   appendChatBubble('user', text);
   conversationHistory.push({ role: 'user', content: text });
 
+  // Turn count = number of user messages so far (we just pushed one)
+  const turnCount = conversationHistory.filter((m) => m.role === 'user').length;
+  updateTalkPhase(turnCount);
+
   elements.talkMicButton.disabled = true;
   elements.talkMicButton.classList.remove('listening');
+  elements.talkMicButton.textContent = 'Thinking…';
   elements.talkStatus.textContent = '';
+  if (elements.talkLiveTranscript) elements.talkLiveTranscript.textContent = '';
 
   const botBubble = appendTypingBubble();
   let fullReply = '';
-
-  // Audio queue — sentences play back-to-back as they arrive from GPT
   const audioQueue = [];
   let isPlayingAudio = false;
   let streamDone = false;
+  let localSessionComplete = false;
+
+  function onAllAudioDone() {
+    isBotSpeaking = false;
+    talkAudio = null;
+    if (localSessionComplete) {
+      completeSession();
+    } else if (captureMode === TALK_MODE) {
+      elements.talkMicButton.textContent = 'Listening…';
+      startUserListening();
+    }
+  }
 
   function playNext() {
     if (isPlayingAudio || audioQueue.length === 0) return;
@@ -960,28 +1023,21 @@ async function sendUserTurn(text) {
       if (audioQueue.length > 0) {
         playNext();
       } else if (streamDone) {
-        // All sentences spoken — start listening again
-        isBotSpeaking = false;
-        talkAudio = null;
-        elements.talkStatus.textContent = 'Listening — speak freely...';
-        if (captureMode === TALK_MODE) startUserListening();
+        onAllAudioDone();
       }
     };
 
     audio.onerror = () => {
       isPlayingAudio = false;
-      if (audioQueue.length > 0 || streamDone) {
-        isBotSpeaking = false;
-        talkAudio = null;
-        if (captureMode === TALK_MODE) startUserListening();
+      if (audioQueue.length > 0) {
+        playNext();
+      } else if (streamDone) {
+        onAllAudioDone();
       }
     };
 
     talkAudio = audio;
-    audio.play().catch(() => {
-      isPlayingAudio = false;
-      isBotSpeaking = false;
-    });
+    audio.play().catch(() => { isPlayingAudio = false; isBotSpeaking = false; });
   }
 
   function queueSentence(sentence) {
@@ -990,17 +1046,17 @@ async function sendUserTurn(text) {
     audioQueue.push(audio);
     if (!isPlayingAudio) {
       isBotSpeaking = true;
-      elements.talkStatus.textContent = 'Speaking...';
+      elements.talkMicButton.textContent = 'Therapist speaking…';
+      elements.talkStatus.textContent = '';
       playNext();
     }
   }
 
-  // Stream sentences from GPT — start TTS for each sentence as it arrives
   try {
     const res = await fetch('/api/chat-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: conversationHistory })
+      body: JSON.stringify({ messages: conversationHistory, turnCount })
     });
 
     const reader = res.body.getReader();
@@ -1013,7 +1069,7 @@ async function sendUserTurn(text) {
 
       sseBuffer += decoder.decode(value, { stream: true });
       const lines = sseBuffer.split('\n');
-      sseBuffer = lines.pop(); // keep incomplete line
+      sseBuffer = lines.pop();
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
@@ -1022,7 +1078,6 @@ async function sendUserTurn(text) {
 
         if (data.sentence) {
           fullReply += (fullReply ? ' ' : '') + data.sentence;
-          // Update bubble progressively as words arrive
           botBubble.classList.remove('typing');
           botBubble.textContent = fullReply;
           elements.conversationList.scrollTop = elements.conversationList.scrollHeight;
@@ -1030,21 +1085,19 @@ async function sendUserTurn(text) {
         }
         if (data.done) {
           streamDone = true;
+          localSessionComplete = Boolean(data.session_complete);
+          if (localSessionComplete) pendingSessionComplete = true;
           conversationHistory.push({ role: 'assistant', content: fullReply });
-          // If audio queue is already empty (fast connection), start listening now
-          if (!isPlayingAudio && audioQueue.length === 0) {
-            isBotSpeaking = false;
-            if (captureMode === TALK_MODE) startUserListening();
-          }
+          if (!isPlayingAudio && audioQueue.length === 0) onAllAudioDone();
         }
       }
     }
   } catch {
     botBubble.classList.remove('typing');
-    botBubble.textContent = 'I\'m here with you. How are you feeling?';
+    botBubble.textContent = 'I\'m right here with you. Take your time.';
     streamDone = true;
     isBotSpeaking = false;
-    if (captureMode === TALK_MODE) startUserListening();
+    if (captureMode === TALK_MODE && !pendingSessionComplete) startUserListening();
   }
 }
 
@@ -1132,6 +1185,56 @@ function appendTypingBubble() {
   elements.conversationList.appendChild(bubble);
   elements.conversationList.scrollTop = elements.conversationList.scrollHeight;
   return bubble;
+}
+
+function updateTalkPhase(turnCount) {
+  if (!elements.talkPhasePill) return;
+
+  let phase, label;
+  if (turnCount <= 1) {
+    phase = 'rapport'; label = 'Getting to know you';
+  } else if (turnCount <= 4) {
+    phase = 'exploring'; label = 'Exploring';
+  } else if (turnCount <= 7) {
+    phase = 'working'; label = 'Working through';
+  } else {
+    phase = 'wrapping'; label = 'Wrapping up';
+  }
+
+  elements.talkPhasePill.textContent = label;
+  elements.talkPhasePill.dataset.phase = phase;
+
+  if (elements.talkTurnCount) {
+    elements.talkTurnCount.textContent = turnCount > 0 ? `Turn ${turnCount}` : '';
+  }
+}
+
+function completeSession() {
+  isBotSpeaking = false;
+  talkAudio = null;
+  elements.talkMicButton.disabled = true;
+  elements.talkMicButton.textContent = 'Session complete';
+  elements.talkMicButton.classList.remove('listening');
+
+  if (elements.talkPhasePill) {
+    elements.talkPhasePill.textContent = 'Complete';
+    elements.talkPhasePill.dataset.phase = 'wrapping';
+  }
+
+  // Append a visual session-complete marker inside the conversation
+  const pill = document.createElement('div');
+  pill.className = 'talk-session-complete';
+  pill.textContent = 'Session complete';
+  elements.conversationList.appendChild(pill);
+  elements.conversationList.scrollTop = elements.conversationList.scrollHeight;
+
+  elements.talkStatus.textContent = 'Generating your emotional analysis…';
+  elements.endTalkButton.disabled = false;
+
+  // Auto-transition to analysis after a short pause
+  setTimeout(() => {
+    if (captureMode === TALK_MODE) endTalkSession();
+  }, 2800);
 }
 
 function endTalkSession() {

@@ -90,10 +90,15 @@
           <video id="playback" controls class="playback" hidden></video>
 
           <div id="talkPanel" class="talk-panel" hidden>
+            <div class="talk-phase-row">
+              <span class="talk-phase-pill" id="talkPhasePill">Starting</span>
+              <span class="talk-turn-count" id="talkTurnCount"></span>
+            </div>
             <div id="conversationList" class="conversation-list"></div>
+            <div id="talkLiveTranscript" class="talk-live-transcript" aria-live="polite"></div>
             <p id="talkStatus" class="talk-status"></p>
             <div class="talk-controls">
-              <button id="talkMicButton" class="talk-mic-button" type="button" disabled>Tap to speak</button>
+              <button id="talkMicButton" class="talk-mic-button" type="button" disabled>Starting…</button>
               <button id="endTalkButton" class="end-talk-button ghost-button" type="button" disabled>End &amp; analyze</button>
             </div>
           </div>

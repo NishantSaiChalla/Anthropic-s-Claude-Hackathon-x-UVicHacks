@@ -24,6 +24,9 @@ const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
 const openAiTranscriptionModel = process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe';
 const openAiAnalysisModel = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4.1-mini';
 const openAiAudioModel = process.env.OPENAI_AUDIO_MODEL || 'gpt-4o-audio-preview';
+const openAiTalkModel = process.env.OPENAI_TALK_MODEL || 'gpt-4o';
+const openAiTtsModel = process.env.OPENAI_TTS_MODEL || 'tts-1';
+const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || 'nova';
 const huggingFaceApiKey = String(process.env.HUGGINGFACE_API_KEY || '').trim();
 const huggingFaceModel = process.env.HUGGINGFACE_EMOTION_MODEL || 'j-hartmann/emotion-english-distilroberta-base';
 
@@ -185,6 +188,7 @@ app.post('/api/emotion-detect', async (request, response) => {
 // Streaming chat — emits sentences via SSE as GPT generates them so TTS can start immediately
 app.post('/api/chat-stream', async (request, response) => {
   const messages = Array.isArray(request.body?.messages) ? request.body.messages : [];
+  const turnCount = Math.max(0, Number(request.body?.turnCount || 0));
 
   response.set({
     'Content-Type': 'text/event-stream',
@@ -196,47 +200,88 @@ app.post('/api/chat-stream', async (request, response) => {
 
   if (!openai) {
     const fallbacks = [
-      "Hi, I'm glad you're here. How are you feeling right now, in this moment?",
-      "I hear you. Can you tell me a bit more about what's been driving that feeling?",
-      "That makes sense. How long have you been carrying this?",
-      "Thank you for sharing that. What do you think would help you feel even a little lighter today?",
-      "I appreciate your openness. What's one small thing you could do for yourself after this?"
+      "Hi, I'm really glad you're here. How are you feeling right now, in this moment?",
+      "I hear you. Can you tell me a bit more about what's been sitting with you lately?",
+      "That makes a lot of sense. How long have you been carrying this feeling?",
+      "Thank you for trusting me with that. What do you think is underneath it all?",
+      "It sounds like you've been doing a lot on your own. What would feel like even a small relief right now?",
+      "I really appreciate how open you've been today. It takes courage to look at these things honestly. What's one small, gentle thing you could do for yourself after we finish?"
     ];
     const userTurns = messages.filter((m) => m.role === 'user').length;
-    send({ sentence: fallbacks[Math.min(userTurns, fallbacks.length - 1)] });
-    send({ done: true });
+    const idx = Math.min(userTurns, fallbacks.length - 1);
+    send({ sentence: fallbacks[idx] });
+    send({ done: true, session_complete: idx === fallbacks.length - 1 });
     response.end();
     return;
   }
 
+  // Phase guidance steers the therapist through the session arc
+  let phaseGuidance;
+  if (turnCount === 0) {
+    phaseGuidance = 'PHASE — Opening: Greet the user warmly, create a safe and non-judgmental space, and ask one gentle open question about how they are feeling today.';
+  } else if (turnCount <= 2) {
+    phaseGuidance = 'PHASE — Building rapport: Listen carefully. Reflect back what you are hearing in your own words to show you understand. Gently probe with one open question to identify the core thing that is weighing on them.';
+  } else if (turnCount <= 5) {
+    phaseGuidance = 'PHASE — Exploring: You are starting to understand their core concern. Validate their experience, help them name what they are feeling more precisely, and gently guide them deeper. Do not rush to solutions yet.';
+  } else if (turnCount <= 8) {
+    phaseGuidance = 'PHASE — Working through: You have a clear picture of the issue. Help them examine it from a new angle, find one concrete insight, or identify a small coping step they could actually take. Keep responses warm and human.';
+  } else {
+    phaseGuidance = 'PHASE — Closing: You have explored the issue together. Reflect the progress made in this conversation, offer one last piece of affirmation or a small concrete next step, and bring the session to a warm and supportive close. When you are done, append exactly the token [END_SESSION] at the very end of your final sentence — nothing after it.';
+  }
+
   try {
     const systemPrompt = [
-      'You are a compassionate mental wellness companion conducting a short daily emotional check-in.',
-      'Listen actively, reflect what the user shares, and gently deepen the conversation one step at a time.',
-      'Adapt your tone to match the user\'s emotional state — calm and grounding when anxious, warm and energising when low.',
-      'Drive the conversation forward: explore what is behind each feeling rather than just validating it.',
-      'Keep every response to 2-3 natural spoken sentences. Always end with exactly one open question.',
-      'Never use lists, headers, or clinical language. Speak as a caring human would in conversation.',
-      'You are not a medical professional. If the user expresses serious distress, gently suggest professional support.'
+      'You are a warm, empathetic therapist conducting a voice-based emotional check-in session.',
+      'Use evidence-based techniques: accurately reflect feelings, validate emotions without judgment, and gently explore the "why" beneath what the user shares.',
+      'Ask open-ended questions that invite genuine depth — not yes/no answers.',
+      'Mirror the user\'s emotional tone: slow and grounding when anxious or overwhelmed, warm and present when low.',
+      'Never interpret or label their experience prematurely — follow their lead and check your understanding.',
+      'Keep every response to 2-3 natural spoken sentences. Always end with exactly one thoughtful open question.',
+      'Never use lists, bullet points, headers, or clinical jargon. Speak as a caring human therapist would — unhurried and genuinely curious.',
+      'Do not give advice unless explicitly invited. Your role is to listen, reflect, and guide the user toward their own insight.',
+      'If the user expresses serious distress, suicidal thoughts, or self-harm, compassionately encourage them to contact a crisis line or mental health professional.',
+      '',
+      phaseGuidance
     ].join(' ');
 
     const stream = await openai.chat.completions.create({
-      model: openAiAnalysisModel,
-      temperature: 0.85,
-      max_tokens: 160,
+      model: openAiTalkModel,
+      temperature: 0.8,
+      max_tokens: 200,
       stream: true,
       messages: [{ role: 'system', content: systemPrompt }, ...messages]
     });
 
     let buffer = '';
-    // Sentence boundary: ends with . ! ? optionally followed by space or quote
+    let sessionComplete = false;
+    // Sentence boundary: ends with . ! ? optionally followed by quote/space
     const sentenceEnd = /[.!?]["']?\s/;
 
     for await (const chunk of stream) {
       const token = chunk.choices[0]?.delta?.content || '';
       buffer += token;
 
-      // Flush complete sentences as soon as they arrive
+      // Detect therapist signalling end of session
+      if (buffer.includes('[END_SESSION]')) {
+        const beforeMarker = buffer.slice(0, buffer.indexOf('[END_SESSION]')).trim();
+        buffer = '';
+        sessionComplete = true;
+
+        // Flush everything before the marker as sentences
+        if (beforeMarker) {
+          let tmp = beforeMarker;
+          let m;
+          while ((m = sentenceEnd.exec(tmp)) !== null) {
+            const s = tmp.slice(0, m.index + 1).trim();
+            tmp = tmp.slice(m.index + m[0].length).trimStart();
+            if (s) send({ sentence: s });
+          }
+          if (tmp.trim()) send({ sentence: tmp.trim() });
+        }
+        break;
+      }
+
+      // Flush complete sentences as they arrive
       let match;
       while ((match = sentenceEnd.exec(buffer)) !== null) {
         const sentence = buffer.slice(0, match.index + 1).trim();
@@ -245,14 +290,50 @@ app.post('/api/chat-stream', async (request, response) => {
       }
     }
 
-    // Flush any remaining text
-    const remaining = buffer.trim();
-    if (remaining) send({ sentence: remaining });
-    send({ done: true });
+    // Flush any remaining text (only if session didn't signal complete)
+    if (!sessionComplete) {
+      const remaining = buffer.trim();
+      if (remaining) send({ sentence: remaining });
+    }
+
+    send({ done: true, ...(sessionComplete && { session_complete: true }) });
     response.end();
   } catch (error) {
     send({ error: 'Chat failed.' });
     response.end();
+  }
+});
+
+app.get('/api/tts', async (request, response) => {
+  const text = String(request.query.text || '').trim().slice(0, 500);
+
+  if (!text) {
+    response.status(400).end();
+    return;
+  }
+
+  if (!openai) {
+    response.status(503).json({ error: 'OPENAI_API_KEY is required for TTS.' });
+    return;
+  }
+
+  try {
+    const speech = await openai.audio.speech.create({
+      model: openAiTtsModel,
+      voice: openAiTtsVoice,
+      input: text,
+      response_format: 'mp3'
+    });
+
+    const buffer = Buffer.from(await speech.arrayBuffer());
+    response.set('Content-Type', 'audio/mpeg');
+    response.set('Cache-Control', 'public, max-age=300');
+    response.send(buffer);
+  } catch (error) {
+    response.status(500).json({
+      error: 'TTS failed.',
+      details: error instanceof Error ? error.message : 'Unknown error.'
+    });
   }
 });
 
