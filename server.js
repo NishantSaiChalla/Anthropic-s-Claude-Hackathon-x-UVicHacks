@@ -110,11 +110,10 @@ app.post('/api/analyze-recording', upload.single('audio'), async (request, respo
       return;
     }
 
-
-    const [analysis, emotionResult] = await Promise.all([
-      analyzeTranscriptWithPreferredModel(transcript, mode),
-      detectEmotionsWithHuggingFace(transcript)
-    ]);
+    const emotionResult = await detectEmotionsWithHuggingFace(transcript);
+    const emotionContext = emotionResult?.dominant?.label || 'neutral';
+    
+    const analysis = await analyzeTranscriptWithPreferredModel(transcript, mode, emotionContext);
 
     response.json({
       transcript,
@@ -147,10 +146,10 @@ app.post('/api/analyze-text', async (request, response) => {
 
   try {
     const mode = String(request.body?.mode || 'advanced');
-    const [analysis, emotionResult] = await Promise.all([
-      analyzeTranscriptWithPreferredModel(transcript, mode),
-      detectEmotionsWithHuggingFace(transcript)
-    ]);
+    const emotionResult = await detectEmotionsWithHuggingFace(transcript);
+    const emotionContext = emotionResult?.dominant?.label || 'neutral';
+    
+    const analysis = await analyzeTranscriptWithPreferredModel(transcript, mode, emotionContext);
 
     response.json({
       ...analysis,
@@ -379,10 +378,11 @@ async function analyzeAudioDirectly(file) {
               'Requirements:',
               '- concernLevel must be one of low, moderate, high',
               '- sentimentScore must be a number from -1 to 1',
-              '- rationale must mention both vocal delivery AND content, under 40 words',
-              '- feedback must be under 45 words and sound supportive but direct',
-              '- wellnessTips must contain 2 or 3 items, each under 18 words',
-              '- supportiveMessage must be under 30 words',
+              '- rationale should explain your thoughts gently, like a caring friend (under 40 words)',
+              '- feedback should feel like a warm, supportive text message from a best friend helping you overcome a problem (under 45 words)',
+              '- wellnessTips must contain 2 or 3 very simple, easy actions, each under 18 words',
+              '- supportiveMessage must be an encouraging, friendly sign-off (under 30 words)',
+              '- no medical jargon, keep it extremely natural and conversational',
               '- no markdown, no code fences, no extra text'
             ].join('\n')
           }
@@ -443,19 +443,18 @@ async function transcribeAudioWithOpenAI(file) {
   return String(transcript.text || '').trim();
 }
 
-async function analyzeTranscriptWithPreferredModel(transcript, mode = 'advanced') {
+async function analyzeTranscriptWithPreferredModel(transcript, mode = 'advanced', emotionContext = 'neutral') {
   if (mode === 'basic') {
-    return analyzeTranscriptHeuristically(transcript);
+    return analyzeTranscriptHeuristically(transcript, emotionContext);
   }
 
   if (openai) {
-    return analyzeTranscriptWithOpenAI(transcript);
+    return analyzeTranscriptWithOpenAI(transcript, emotionContext);
   }
-
-  return analyzeTranscriptHeuristically(transcript);
+  return analyzeTranscriptHeuristically(transcript, emotionContext);
 }
 
-function analyzeTranscriptHeuristically(transcript) {
+function analyzeTranscriptHeuristically(transcript, emotionContext = 'neutral') {
   const text = transcript.toLowerCase();
   const scores = {
     depression: keywordScore(text, [
@@ -525,7 +524,7 @@ function keywordScore(text, words) {
   return words.reduce((score, entry) => score + (text.includes(entry.cue) ? entry.weight : 0), 0);
 }
 
-async function analyzeTranscriptWithOpenAI(transcript) {
+async function analyzeTranscriptWithOpenAI(transcript, emotionContext = 'neutral') {
   const completion = await openai.chat.completions.create({
     model: openAiAnalysisModel,
     temperature: 0.2,
@@ -549,10 +548,11 @@ async function analyzeTranscriptWithOpenAI(transcript) {
           'Requirements:',
           '- concernLevel must be one of low, moderate, high',
           '- sentimentScore must be a number from -1 to 1',
-          '- rationale must be under 35 words',
-          '- feedback must be under 45 words and sound supportive but direct',
-          '- wellnessTips must contain 2 or 3 items, each under 18 words',
-          '- supportiveMessage must be under 30 words',
+          `- rationale should explain the emotional cues gently, addressing their dominant emotion: ${emotionContext} (under 35 words)`,
+          `- feedback should read like a warm, supportive text message from a caring friend comforting them through their ${emotionContext} (under 45 words)`,
+          '- wellnessTips must contain 2 or 3 very simple, easy actions, each under 18 words',
+          '- supportiveMessage must be an encouraging, friendly sign-off (under 30 words)',
+          '- no medical jargon, keep it extremely natural and conversational',
           '- no markdown, no code fences'
         ].join('\n')
       }
@@ -580,6 +580,7 @@ async function analyzeTranscriptWithOpenAI(transcript) {
     supportiveMessage: String(parsed.supportiveMessage || 'Invite the user to check in again tomorrow.')
   };
 }
+
 
 function stripJsonEnvelope(text) {
   return text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
