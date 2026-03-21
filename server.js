@@ -5,7 +5,6 @@ import OpenAI from 'openai';
 import { toFile } from 'openai/uploads';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Anthropic from '@anthropic-ai/sdk';
 import { HfInference } from '@huggingface/inference';
 
 dotenv.config();
@@ -25,16 +24,11 @@ const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
 const openAiTranscriptionModel = process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe';
 const openAiAnalysisModel = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4.1-mini';
 const openAiAudioModel = process.env.OPENAI_AUDIO_MODEL || 'gpt-4o-audio-preview';
-const anthropicApiKey = String(process.env.ANTHROPIC_API_KEY || '').trim();
-const anthropicModel = process.env.ANTHROPIC_MODEL || 'claude-3-7-sonnet-latest';
 const huggingFaceApiKey = String(process.env.HUGGINGFACE_API_KEY || '').trim();
 const huggingFaceModel = process.env.HUGGINGFACE_EMOTION_MODEL || 'j-hartmann/emotion-english-distilroberta-base';
 
 const openai = isConfiguredApiKey(openAiApiKey)
   ? new OpenAI({ apiKey: openAiApiKey })
-  : null;
-const anthropic = isConfiguredApiKey(anthropicApiKey)
-  ? new Anthropic({ apiKey: anthropicApiKey })
   : null;
 const huggingFaceConfigured = isConfiguredApiKey(huggingFaceApiKey);
 
@@ -45,7 +39,6 @@ app.get('/api/health', (_request, response) => {
   response.json({
     ok: true,
     openAiConfigured: Boolean(openai),
-    anthropicConfigured: Boolean(anthropic),
     huggingFaceConfigured,
     huggingFaceModel: huggingFaceConfigured ? huggingFaceModel : null,
     transcriptionModel: openai ? openAiTranscriptionModel : null,
@@ -189,6 +182,80 @@ app.post('/api/emotion-detect', async (request, response) => {
   }
 });
 
+// Streaming chat — emits sentences via SSE as GPT generates them so TTS can start immediately
+app.post('/api/chat-stream', async (request, response) => {
+  const messages = Array.isArray(request.body?.messages) ? request.body.messages : [];
+
+  response.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+
+  const send = (obj) => response.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+  if (!openai) {
+    const fallbacks = [
+      "Hi, I'm glad you're here. How are you feeling right now, in this moment?",
+      "I hear you. Can you tell me a bit more about what's been driving that feeling?",
+      "That makes sense. How long have you been carrying this?",
+      "Thank you for sharing that. What do you think would help you feel even a little lighter today?",
+      "I appreciate your openness. What's one small thing you could do for yourself after this?"
+    ];
+    const userTurns = messages.filter((m) => m.role === 'user').length;
+    send({ sentence: fallbacks[Math.min(userTurns, fallbacks.length - 1)] });
+    send({ done: true });
+    response.end();
+    return;
+  }
+
+  try {
+    const systemPrompt = [
+      'You are a compassionate mental wellness companion conducting a short daily emotional check-in.',
+      'Listen actively, reflect what the user shares, and gently deepen the conversation one step at a time.',
+      'Adapt your tone to match the user\'s emotional state — calm and grounding when anxious, warm and energising when low.',
+      'Drive the conversation forward: explore what is behind each feeling rather than just validating it.',
+      'Keep every response to 2-3 natural spoken sentences. Always end with exactly one open question.',
+      'Never use lists, headers, or clinical language. Speak as a caring human would in conversation.',
+      'You are not a medical professional. If the user expresses serious distress, gently suggest professional support.'
+    ].join(' ');
+
+    const stream = await openai.chat.completions.create({
+      model: openAiAnalysisModel,
+      temperature: 0.85,
+      max_tokens: 160,
+      stream: true,
+      messages: [{ role: 'system', content: systemPrompt }, ...messages]
+    });
+
+    let buffer = '';
+    // Sentence boundary: ends with . ! ? optionally followed by space or quote
+    const sentenceEnd = /[.!?]["']?\s/;
+
+    for await (const chunk of stream) {
+      const token = chunk.choices[0]?.delta?.content || '';
+      buffer += token;
+
+      // Flush complete sentences as soon as they arrive
+      let match;
+      while ((match = sentenceEnd.exec(buffer)) !== null) {
+        const sentence = buffer.slice(0, match.index + 1).trim();
+        buffer = buffer.slice(match.index + match[0].length).trimStart();
+        if (sentence) send({ sentence });
+      }
+    }
+
+    // Flush any remaining text
+    const remaining = buffer.trim();
+    if (remaining) send({ sentence: remaining });
+    send({ done: true });
+    response.end();
+  } catch (error) {
+    send({ error: 'Chat failed.' });
+    response.end();
+  }
+});
+
 app.get('*', (_request, response) => {
   response.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -279,10 +346,6 @@ function getAnalysisModelName() {
     return openAiAnalysisModel;
   }
 
-  if (anthropic) {
-    return anthropicModel;
-  }
-
   return 'local-heuristic';
 }
 
@@ -306,10 +369,6 @@ async function analyzeTranscriptWithPreferredModel(transcript, mode = 'advanced'
 
   if (openai) {
     return analyzeTranscriptWithOpenAI(transcript);
-  }
-
-  if (anthropic) {
-    return analyzeTranscriptWithClaude(transcript);
   }
 
   return analyzeTranscriptHeuristically(transcript);
@@ -436,70 +495,6 @@ async function analyzeTranscriptWithOpenAI(transcript) {
     sentimentScore: clampNumber(parsed.sentimentScore, -1, 1),
     rationale: String(parsed.rationale || 'GPT analyzed the transcript for emotional cues.'),
     feedback: String(parsed.feedback || 'The recording suggests a useful moment to pause and choose one supportive next step.'),
-    wellnessTips: normalizeTips(parsed.wellnessTips),
-    supportiveMessage: String(parsed.supportiveMessage || 'Invite the user to check in again tomorrow.')
-  };
-}
-
-async function analyzeTranscriptWithClaude(transcript) {
-  const message = await anthropic.messages.create({
-    model: anthropicModel,
-    max_tokens: 400,
-    temperature: 0.2,
-    system: [
-      'You analyze short daily mental wellness voice-note transcripts for a hackathon MVP.',
-      'You are not diagnosing or making medical claims.',
-      'Return only valid JSON with keys: emotionalState, concernLevel, sentimentScore, rationale, feedback, wellnessTips, supportiveMessage.',
-      'wellnessTips must be an array of 2 or 3 short practical tips.'
-    ].join(' '),
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: [
-              'Transcript:',
-              transcript,
-              '',
-              'Requirements:',
-              '- concernLevel must be one of low, moderate, high',
-              '- sentimentScore must be a number from -1 to 1',
-              '- rationale must be under 35 words',
-              '- feedback must be under 45 words and sound supportive but direct',
-              '- wellnessTips must contain 2 or 3 items, each under 18 words',
-              '- supportiveMessage must be under 30 words',
-              '- no markdown, no code fences'
-            ].join('\n')
-          }
-        ]
-      }
-    ]
-  });
-
-  const text = message.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('')
-    .trim();
-
-  let parsed;
-  try {
-    parsed = JSON.parse(stripJsonEnvelope(text));
-  } catch {
-    return {
-      ...analyzeTranscriptHeuristically(transcript),
-      source: 'heuristic'
-    };
-  }
-
-  return {
-    source: 'claude',
-    emotionalState: String(parsed.emotionalState || 'steady'),
-    concernLevel: normalizeConcernLevel(parsed.concernLevel),
-    sentimentScore: clampNumber(parsed.sentimentScore, -1, 1),
-    rationale: String(parsed.rationale || 'Claude analyzed the transcript for emotional cues.'),
-    feedback: String(parsed.feedback || 'The recording suggests a useful moment to slow down and choose one supportive action.'),
     wellnessTips: normalizeTips(parsed.wellnessTips),
     supportiveMessage: String(parsed.supportiveMessage || 'Invite the user to check in again tomorrow.')
   };
