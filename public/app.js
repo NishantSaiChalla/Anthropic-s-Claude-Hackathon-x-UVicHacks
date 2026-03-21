@@ -43,6 +43,10 @@ const elements = {
   textNarrative: document.querySelector('#textNarrative'),
   feedbackNarrative: document.querySelector('#feedbackNarrative'),
   tipsList: document.querySelector('#tipsList'),
+  emotionCard: document.querySelector('#emotionCard'),
+  emotionModelLabel: document.querySelector('#emotionModelLabel'),
+  emotionBars: document.querySelector('#emotionBars'),
+  emotionDominant: document.querySelector('#emotionDominant'),
   analysisBasicButton: document.querySelector('#analysisBasicButton'),
   analysisAdvancedButton: document.querySelector('#analysisAdvancedButton'),
   analysisDirectButton: document.querySelector('#analysisDirectButton'),
@@ -50,7 +54,11 @@ const elements = {
   historyList: document.querySelector('#historyList'),
   sparklineWrap: document.querySelector('#sparklineWrap'),
   historySparkline: document.querySelector('#historySparkline'),
-  historyNudge: document.querySelector('#historyNudge')
+  historyNudge: document.querySelector('#historyNudge'),
+  streakCounter: document.querySelector('#streakCounter'),
+  streakNumber: document.querySelector('#streakNumber'),
+  restDayButton: document.querySelector('#restDayButton'),
+  resetTrendlineButton: document.querySelector('#resetTrendlineButton')
 };
 
 let mediaRecorder = null;
@@ -74,6 +82,8 @@ let analysisMode = ADVANCED_ANALYSIS;
 let serverCapabilities = {
   openAiConfigured: false,
   anthropicConfigured: false,
+  huggingFaceConfigured: false,
+  huggingFaceModel: null,
   analysisModel: 'local-heuristic',
   transcriptionModel: null
 };
@@ -105,6 +115,8 @@ function wireEvents() {
     }
   });
   elements.analyzeButton.addEventListener('click', analyzeEntry);
+  elements.restDayButton.addEventListener('click', logRestDay);
+  elements.resetTrendlineButton.addEventListener('click', resetTrendline);
   elements.clearTranscriptButton.addEventListener('click', () => {
     finalTranscript = '';
     elements.transcriptInput.value = '';
@@ -121,18 +133,19 @@ function setCaptureMode(mode) {
   }
 
   captureMode = mode;
-  const usingRecordMode = captureMode === RECORDING_MODE;
+  const usingRecord = captureMode === RECORDING_MODE;
+  const usingUpload = captureMode === UPLOAD_MODE;
 
-  elements.modeRecordButton.classList.toggle('active', usingRecordMode);
-  elements.modeRecordButton.setAttribute('aria-selected', String(usingRecordMode));
-  elements.modeUploadButton.classList.toggle('active', !usingRecordMode);
-  elements.modeUploadButton.setAttribute('aria-selected', String(!usingRecordMode));
+  elements.modeRecordButton.classList.toggle('active', usingRecord);
+  elements.modeRecordButton.setAttribute('aria-selected', String(usingRecord));
+  elements.modeUploadButton.classList.toggle('active', usingUpload);
+  elements.modeUploadButton.setAttribute('aria-selected', String(usingUpload));
 
-  elements.recordingPanel.hidden = !usingRecordMode;
-  elements.recordingButtons.hidden = !usingRecordMode;
-  elements.uploadPanel.hidden = usingRecordMode;
+  elements.recordingPanel.hidden = !usingRecord;
+  elements.recordingButtons.hidden = !usingRecord;
+  elements.uploadPanel.hidden = !usingUpload;
 
-  if (!usingRecordMode) {
+  if (!usingRecord) {
     stopRecording();
     updateTimer(RECORDING_LIMIT_SECONDS);
     elements.meterCaption.textContent = 'Upload mode ready';
@@ -218,9 +231,9 @@ function refreshCapabilityWarnings() {
 }
 
 async function handleUploadedFile(file) {
-  const looksAudio = file.type.startsWith('audio/') || /\.(wav|mp3|m4a|ogg|webm|aac|flac)$/i.test(file.name);
+  const looksAudio = file.type.startsWith('audio/') || file.type.startsWith('video/') || /\.(wav|mp3|m4a|ogg|webm|aac|flac|mp4|mov|mkv)$/i.test(file.name);
   if (!looksAudio) {
-    elements.analysisStatus.textContent = 'Please choose a valid audio file.';
+    elements.analysisStatus.textContent = 'Please choose a valid audio or video file.';
     return;
   }
 
@@ -378,6 +391,7 @@ async function analyzeEntry() {
   }
 
   const transcriptDraft = elements.transcriptInput.value.trim();
+
   if (!serverCapabilities.openAiConfigured && !transcriptDraft) {
     elements.analysisStatus.textContent = 'Add a transcript or summary to continue.';
     return;
@@ -408,10 +422,12 @@ async function analyzeEntry() {
 
     const vocalMetrics = await extractAudioMetrics(audioBlob, transcript);
     const textAnalysis = recordingAnalysis.textAnalysis;
+    const emotionDetection = recordingAnalysis.emotionDetection || null;
     const combined = combineSignals(vocalMetrics, textAnalysis);
 
     renderResult(combined, vocalMetrics, textAnalysis);
-    storeHistory(combined, vocalMetrics, textAnalysis, transcript);
+    renderEmotionDetection(emotionDetection);
+    storeHistory(combined, vocalMetrics, textAnalysis, transcript, emotionDetection);
     renderHistory();
     elements.analysisStatus.textContent = 'Analysis complete.';
   } catch (error) {
@@ -578,30 +594,113 @@ function renderResult(combined, vocalMetrics, textAnalysis) {
   renderTips(normalizedAnalysis.wellnessTips, vocalMetrics);
 }
 
-function storeHistory(combined, vocalMetrics, textAnalysis, transcript) {
+function storeHistory(combined, vocalMetrics, textAnalysis, transcript, emotionDetection) {
   const entries = readHistory();
   const today = new Date().toISOString();
+  const dominant = emotionDetection?.dominant?.label || null;
+  const dk = todayDateKey();
   const nextEntries = [
     {
       id: today,
+      dateKey: dk,
       date: formatDate(today),
       level: combined.level,
       headline: combined.headline,
       summary: combined.summary,
       emotionalState: textAnalysis.emotionalState,
       wordsPerMinute: vocalMetrics.wordsPerMinute,
-      transcriptPreview: transcript.slice(0, 120)
+      transcriptPreview: transcript.slice(0, 120),
+      mlEmotion: dominant
+    },
+    ...entries.filter((e) => entryDateKey(e) !== dk)
+  ].slice(0, 7);
+
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(nextEntries));
+}
+
+function logRestDay() {
+  const entries = readHistory();
+  const dk = todayDateKey();
+  if (entries.some((e) => entryDateKey(e) === dk)) {
+    return;
+  }
+
+  const today = new Date().toISOString();
+  const nextEntries = [
+    {
+      id: today,
+      dateKey: dk,
+      date: formatDate(today),
+      level: 'rest',
+      isRest: true,
+      headline: 'Rest day logged.',
+      summary: 'You chose to rest today. Consistency matters more than perfection.',
+      emotionalState: 'resting',
+      wordsPerMinute: 0,
+      transcriptPreview: ''
     },
     ...entries
   ].slice(0, 7);
 
   localStorage.setItem(HISTORY_KEY, JSON.stringify(nextEntries));
+  renderHistory();
+}
+
+function resetTrendline() {
+  if (!window.confirm('Clear all check-in history? This cannot be undone.')) {
+    return;
+  }
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+}
+
+function todayDateKey() {
+  return new Date().toLocaleDateString('en-CA');
+}
+
+function entryDateKey(entry) {
+  return entry.dateKey || (entry.id ? entry.id.slice(0, 10) : null);
+}
+
+function computeStreak(entries) {
+  if (!entries.length) {
+    return 0;
+  }
+
+  const keys = new Set(entries.map(entryDateKey).filter(Boolean));
+  let streak = 0;
+  const cursor = new Date();
+
+  for (let i = 0; i < 365; i++) {
+    const key = cursor.toLocaleDateString('en-CA');
+    if (keys.has(key)) {
+      streak++;
+    } else if (i === 0) {
+      // today has no entry yet — streak from yesterday still alive
+    } else {
+      break;
+    }
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  return streak;
+}
+
+function renderStreak(entries) {
+  const streak = computeStreak(entries);
+  elements.streakCounter.hidden = streak === 0;
+  elements.streakNumber.textContent = String(streak);
+
+  const hasEntryToday = entries.some((e) => entryDateKey(e) === todayDateKey());
+  elements.restDayButton.disabled = hasEntryToday;
+  elements.restDayButton.textContent = hasEntryToday ? 'Rested today' : 'Log rest day';
 }
 
 function renderHistory() {
   const entries = readHistory();
   elements.historyList.innerHTML = '';
   renderSparkline(entries);
+  renderStreak(entries);
 
   if (entries.length < 2) {
     elements.historyNudge.hidden = false;
@@ -628,7 +727,8 @@ function renderHistory() {
     title.textContent = String(entry.date || 'Recent check-in');
     const tag = document.createElement('span');
     tag.className = 'history-tag';
-    tag.textContent = String(entry.level || 'stable');
+    tag.dataset.level = String(entry.level || 'stable');
+    tag.textContent = entry.isRest ? 'rest day' : String(entry.level || 'stable');
     header.append(title, tag);
 
     const headline = document.createElement('p');
@@ -638,7 +738,7 @@ function renderHistory() {
     transcript.textContent = String(entry.transcriptPreview || '(no transcript)');
 
     const metrics = document.createElement('p');
-    metrics.textContent = `${Number(entry.wordsPerMinute || 0)} wpm · ${String(entry.emotionalState || 'steady')}`;
+    metrics.textContent = `${Number(entry.wordsPerMinute || 0)} wpm · ${String(entry.emotionalState || 'steady')}${entry.mlEmotion ? ` · ML: ${entry.mlEmotion}` : ''}`;
 
     card.append(header, headline, transcript, metrics);
     elements.historyList.append(card);
@@ -802,7 +902,8 @@ function levelToY(level, height, padding) {
   const yByLevel = {
     stable: height - padding,
     elevated: height / 2,
-    high: padding
+    high: padding,
+    rest: height - padding
   };
 
   return yByLevel[level] || yByLevel.stable;
@@ -812,7 +913,8 @@ function levelColor(level) {
   const colorByLevel = {
     stable: '#5f8b7e',
     elevated: '#d97a20',
-    high: '#ab3f45'
+    high: '#ab3f45',
+    rest: '#b5aca0'
   };
 
   return colorByLevel[level] || colorByLevel.stable;
@@ -1003,4 +1105,63 @@ function setTranscriptStatus(message) {
 function buildRecordingFilename(blob) {
   const extension = blob.type.includes('mp4') ? 'm4a' : 'webm';
   return `voice-note.${extension}`;
+}
+
+function renderEmotionDetection(emotionDetection) {
+  if (!elements.emotionCard) {
+    return;
+  }
+
+  if (!emotionDetection || !emotionDetection.emotions) {
+    elements.emotionCard.hidden = true;
+    return;
+  }
+
+  elements.emotionCard.hidden = false;
+  elements.emotionModelLabel.textContent = emotionDetection.model
+    ? `Model: ${emotionDetection.model}`
+    : 'ML emotion classifier';
+
+  elements.emotionBars.innerHTML = '';
+
+  const sortedEmotions = Object.entries(emotionDetection.emotions)
+    .sort((a, b) => b[1] - a[1]);
+
+  for (const [emotion, score] of sortedEmotions) {
+    const row = document.createElement('div');
+    row.className = 'emotion-bar-row';
+
+    const label = document.createElement('span');
+    label.className = 'emotion-bar-label';
+    label.textContent = emotion;
+
+    const track = document.createElement('div');
+    track.className = 'emotion-bar-track';
+
+    const fill = document.createElement('div');
+    fill.className = 'emotion-bar-fill';
+    fill.dataset.emotion = emotion;
+    fill.style.width = '0%';
+    track.append(fill);
+
+    const value = document.createElement('span');
+    value.className = 'emotion-bar-value';
+    value.textContent = `${(score * 100).toFixed(1)}%`;
+
+    row.append(label, track, value);
+    elements.emotionBars.append(row);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        fill.style.width = `${(score * 100).toFixed(1)}%`;
+      });
+    });
+  }
+
+  if (emotionDetection.dominant) {
+    elements.emotionDominant.innerHTML =
+      `Dominant emotion: <strong>${emotionDetection.dominant.label}</strong> (${(emotionDetection.dominant.score * 100).toFixed(1)}% confidence)`;
+  } else {
+    elements.emotionDominant.textContent = '';
+  }
 }

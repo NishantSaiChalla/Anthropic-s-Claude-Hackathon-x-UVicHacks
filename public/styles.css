@@ -18,6 +18,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -244,6 +248,7 @@ textarea {
   margin-top: 0.6rem;
 }
 
+
 .upload-drop-zone {
   display: grid;
   place-items: center;
@@ -351,7 +356,10 @@ textarea {
 
 .playback {
   width: 100%;
+  max-height: 280px;
   margin-top: 1rem;
+  background: #000;
+  border-radius: 8px;
 }
 
 .field-label {
@@ -480,6 +488,156 @@ textarea:focus {
 
 .tips-list li + li {
   margin-top: 0.45rem;
+}
+
+.emotion-detection-card {
+  padding: 1rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(95, 139, 126, 0.18);
+}
+
+.emotion-detection-card h4 {
+  margin: 0 0 0.3rem;
+}
+
+.emotion-model-label {
+  margin: 0 0 0.8rem;
+  font-size: 0.78rem;
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: var(--ink-soft);
+}
+
+.emotion-bars {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.emotion-bar-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 48px;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.emotion-bar-label {
+  font-size: 0.82rem;
+  text-transform: capitalize;
+  color: var(--ink);
+}
+
+.emotion-bar-track {
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(23, 36, 47, 0.06);
+}
+
+.emotion-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 600ms ease;
+}
+
+.emotion-bar-fill[data-emotion='anger'] { background: linear-gradient(90deg, #e74c3c, #c0392b); }
+.emotion-bar-fill[data-emotion='disgust'] { background: linear-gradient(90deg, #8e44ad, #6c3483); }
+.emotion-bar-fill[data-emotion='fear'] { background: linear-gradient(90deg, #f39c12, #e67e22); }
+.emotion-bar-fill[data-emotion='joy'] { background: linear-gradient(90deg, #2ecc71, #27ae60); }
+.emotion-bar-fill[data-emotion='neutral'] { background: linear-gradient(90deg, #95a5a6, #7f8c8d); }
+.emotion-bar-fill[data-emotion='sadness'] { background: linear-gradient(90deg, #3498db, #2980b9); }
+.emotion-bar-fill[data-emotion='surprise'] { background: linear-gradient(90deg, #e91e63, #c2185b); }
+
+.emotion-bar-value {
+  font-size: 0.78rem;
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: var(--ink-soft);
+  text-align: right;
+}
+
+.emotion-dominant {
+  margin: 0.7rem 0 0;
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.emotion-dominant strong {
+  text-transform: capitalize;
+}
+
+.storage-note {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin: -0.4rem 0 0.9rem;
+}
+
+.streak-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.streak-counter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.4rem 0.85rem;
+  border-radius: 16px;
+  background: rgba(95, 139, 126, 0.13);
+}
+
+.streak-counter span {
+  display: block;
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--mint);
+}
+
+.streak-counter p {
+  margin: 0.18rem 0 0;
+  font-size: 0.7rem;
+  color: var(--mint);
+  font-family: 'Consolas', 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.rest-day-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.reset-trendline-button {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.reset-trendline-button:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.history-tag[data-level='stable'] {
+  background: rgba(95, 139, 126, 0.12);
+  color: var(--mint);
+}
+
+.history-tag[data-level='elevated'] {
+  background: rgba(217, 122, 32, 0.12);
+  color: var(--warning);
+}
+
+.history-tag[data-level='high'] {
+  background: rgba(171, 63, 69, 0.12);
+  color: var(--danger);
+}
+
+.history-tag[data-level='rest'] {
+  background: rgba(23, 36, 47, 0.06);
+  color: var(--ink-soft);
 }
 
 .history-list {

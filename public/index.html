@@ -48,7 +48,7 @@
               Record
             </button>
             <button id="modeUploadButton" class="mode-button" type="button" role="tab" aria-selected="false">
-              Upload
+              Upload Recording
             </button>
           </div>
 
@@ -73,18 +73,18 @@
           </div>
 
           <div id="uploadPanel" class="upload-panel" hidden>
-            <input id="audioUploadInput" type="file" accept="audio/*" hidden />
+            <input id="audioUploadInput" type="file" accept="audio/*,video/*,.mp3,.mp4,.mov,.m4a,.wav,.ogg,.webm,.aac,.flac" hidden />
             <button id="chooseFileButton" class="ghost-button" type="button">Choose audio file</button>
             <div id="uploadDropZone" class="upload-drop-zone" tabindex="0" role="button" aria-label="Drop audio file here or click to choose">
               <svg class="upload-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 3L7.5 7.5h3v6h3v-6h3L12 3zm-7 12v4h14v-4h2v6H3v-6h2z"></path>
               </svg>
-              <p>Drag and drop an audio file here</p>
-              <p class="upload-help">or click to browse</p>
+              <p>Drag and drop an audio or video file here</p>
+              <p class="upload-help">or click to browse (.mp3, .mp4, .wav, .m4a&hellip;)</p>
             </div>
           </div>
 
-          <audio id="playback" controls class="playback" hidden></audio>
+          <video id="playback" controls class="playback" hidden></video>
 
           <div class="support-copy">
             Record or upload audio, then send it to GPT for transcription, emotional feedback, and practical wellness tips.
@@ -162,6 +162,12 @@
                 <p id="textNarrative"></p>
               </article>
             </div>
+            <div class="emotion-detection-card" id="emotionCard" hidden>
+              <h4>ML Emotion Detection</h4>
+              <p class="emotion-model-label" id="emotionModelLabel"></p>
+              <div class="emotion-bars" id="emotionBars"></div>
+              <p class="emotion-dominant" id="emotionDominant"></p>
+            </div>
             <div class="guidance-card">
               <h4>Feedback and tips</h4>
               <p id="feedbackNarrative"></p>
@@ -176,8 +182,16 @@
               <p class="eyebrow">Trendline</p>
               <h2>Recent check-ins</h2>
             </div>
-            <span class="history-note">Stored locally in this browser</span>
+            <div class="streak-actions">
+              <div class="streak-counter" id="streakCounter" hidden>
+                <span id="streakNumber">0</span>
+                <p>day streak</p>
+              </div>
+              <button id="restDayButton" class="mini-button rest-day-button" type="button">Log rest day</button>
+              <button id="resetTrendlineButton" class="mini-button reset-trendline-button" type="button">Reset trendline</button>
+            </div>
           </div>
+          <p class="storage-note">Stored locally in this browser</p>
           <div class="sparkline-wrap" id="sparklineWrap" hidden>
             <svg id="historySparkline" class="sparkline" viewBox="0 0 320 80" preserveAspectRatio="none"></svg>
           </div>

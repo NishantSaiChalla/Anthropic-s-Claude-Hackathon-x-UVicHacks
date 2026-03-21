@@ -6,6 +6,7 @@ import { toFile } from 'openai/uploads';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
+import { HfInference } from '@huggingface/inference';
 
 dotenv.config();
 
@@ -26,6 +27,8 @@ const openAiAnalysisModel = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4.1-mini';
 const openAiAudioModel = process.env.OPENAI_AUDIO_MODEL || 'gpt-4o-audio-preview';
 const anthropicApiKey = String(process.env.ANTHROPIC_API_KEY || '').trim();
 const anthropicModel = process.env.ANTHROPIC_MODEL || 'claude-3-7-sonnet-latest';
+const huggingFaceApiKey = String(process.env.HUGGINGFACE_API_KEY || '').trim();
+const huggingFaceModel = process.env.HUGGINGFACE_EMOTION_MODEL || 'j-hartmann/emotion-english-distilroberta-base';
 
 const openai = isConfiguredApiKey(openAiApiKey)
   ? new OpenAI({ apiKey: openAiApiKey })
@@ -33,6 +36,7 @@ const openai = isConfiguredApiKey(openAiApiKey)
 const anthropic = isConfiguredApiKey(anthropicApiKey)
   ? new Anthropic({ apiKey: anthropicApiKey })
   : null;
+const huggingFaceConfigured = isConfiguredApiKey(huggingFaceApiKey);
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -42,6 +46,8 @@ app.get('/api/health', (_request, response) => {
     ok: true,
     openAiConfigured: Boolean(openai),
     anthropicConfigured: Boolean(anthropic),
+    huggingFaceConfigured,
+    huggingFaceModel: huggingFaceConfigured ? huggingFaceModel : null,
     transcriptionModel: openai ? openAiTranscriptionModel : null,
     analysisModel: getAnalysisModelName()
   });
@@ -108,7 +114,11 @@ app.post('/api/analyze-recording', upload.single('audio'), async (request, respo
       return;
     }
 
-    const analysis = await analyzeTranscriptWithPreferredModel(transcript, mode);
+
+    const [analysis, emotionResult] = await Promise.all([
+      analyzeTranscriptWithPreferredModel(transcript, mode),
+      detectEmotionsWithHuggingFace(transcript)
+    ]);
 
     response.json({
       transcript,
@@ -116,6 +126,7 @@ app.post('/api/analyze-recording', upload.single('audio'), async (request, respo
         ...analysis,
         model: getAnalysisModelName()
       },
+      emotionDetection: emotionResult,
       transcription: {
         source: 'openai-audio',
         model: openAiTranscriptionModel
@@ -139,16 +150,40 @@ app.post('/api/analyze-text', async (request, response) => {
   }
 
   try {
-    const analysis = await analyzeTranscriptWithPreferredModel(transcript, String(request.body?.mode || 'advanced'));
+    const mode = String(request.body?.mode || 'advanced');
+    const [analysis, emotionResult] = await Promise.all([
+      analyzeTranscriptWithPreferredModel(transcript, mode),
+      detectEmotionsWithHuggingFace(transcript)
+    ]);
 
     response.json({
       ...analysis,
+      emotionDetection: emotionResult,
       model: getAnalysisModelName(),
       analyzedAt: new Date().toISOString()
     });
   } catch (error) {
     response.status(500).json({
       error: 'Text analysis failed.',
+      details: error instanceof Error ? error.message : 'Unknown error.'
+    });
+  }
+});
+
+app.post('/api/emotion-detect', async (request, response) => {
+  const text = String(request.body?.text || '').trim();
+
+  if (!text) {
+    response.status(400).json({ error: 'Text is required.' });
+    return;
+  }
+
+  try {
+    const result = await detectEmotionsWithHuggingFace(text);
+    response.json(result);
+  } catch (error) {
+    response.status(500).json({
+      error: 'Emotion detection failed.',
       details: error instanceof Error ? error.message : 'Unknown error.'
     });
   }
@@ -555,4 +590,56 @@ function isConfiguredApiKey(key) {
   ]);
 
   return !placeholders.has(normalized);
+}
+
+async function detectEmotionsWithHuggingFace(text) {
+  if (!huggingFaceConfigured) {
+    return {
+      source: 'unavailable',
+      configured: false,
+      emotions: null,
+      dominant: null,
+      message: 'HUGGINGFACE_API_KEY is not configured. Add it to .env to enable ML-based emotion detection.'
+    };
+  }
+
+  try {
+    const hf = new HfInference(huggingFaceApiKey);
+    const result = await hf.textClassification({
+      model: huggingFaceModel,
+      inputs: text
+    });
+
+    const emotions = {};
+    let dominant = { label: 'neutral', score: 0 };
+
+    for (const entry of result) {
+      const label = String(entry.label || '').toLowerCase();
+      const score = Number(entry.score || 0);
+      emotions[label] = Number(score.toFixed(4));
+      if (score > dominant.score) {
+        dominant = { label, score };
+      }
+    }
+
+    return {
+      source: 'huggingface',
+      configured: true,
+      model: huggingFaceModel,
+      emotions,
+      dominant: {
+        label: dominant.label,
+        score: Number(dominant.score.toFixed(4))
+      }
+    };
+  } catch (error) {
+    console.error('HuggingFace emotion detection failed:', error.message);
+    return {
+      source: 'huggingface-error',
+      configured: true,
+      emotions: null,
+      dominant: null,
+      error: error instanceof Error ? error.message : 'Unknown error.'
+    };
+  }
 }
