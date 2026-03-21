@@ -1,5 +1,8 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import multer from 'multer';
+import OpenAI from 'openai';
+import { toFile } from 'openai/uploads';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
@@ -9,10 +12,24 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 12 * 1024 * 1024
+  }
+});
+
 const port = Number(process.env.PORT || 3000);
+const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+const openAiTranscriptionModel = process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe';
+const openAiAnalysisModel = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4.1-mini';
 const anthropicApiKey = String(process.env.ANTHROPIC_API_KEY || '').trim();
 const anthropicModel = process.env.ANTHROPIC_MODEL || 'claude-3-7-sonnet-latest';
-const anthropic = isConfiguredAnthropicKey(anthropicApiKey)
+
+const openai = isConfiguredApiKey(openAiApiKey)
+  ? new OpenAI({ apiKey: openAiApiKey })
+  : null;
+const anthropic = isConfiguredApiKey(anthropicApiKey)
   ? new Anthropic({ apiKey: anthropicApiKey })
   : null;
 
@@ -20,7 +37,83 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/health', (_request, response) => {
-  response.json({ ok: true, claudeConfigured: Boolean(anthropic) });
+  response.json({
+    ok: true,
+    openAiConfigured: Boolean(openai),
+    anthropicConfigured: Boolean(anthropic),
+    transcriptionModel: openai ? openAiTranscriptionModel : null,
+    analysisModel: getAnalysisModelName()
+  });
+});
+
+app.post('/api/transcribe-recording', upload.single('audio'), async (request, response) => {
+  if (!request.file) {
+    response.status(400).json({ error: 'Audio recording is required.' });
+    return;
+  }
+
+  if (!openai) {
+    response.status(400).json({ error: 'OPENAI_API_KEY is required for recording transcription.' });
+    return;
+  }
+
+  try {
+    const transcript = await transcribeAudioWithOpenAI(request.file);
+
+    response.json({
+      transcript,
+      source: 'openai-audio',
+      model: openAiTranscriptionModel,
+      transcribedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: 'Recording transcription failed.',
+      details: error instanceof Error ? error.message : 'Unknown error.'
+    });
+  }
+});
+
+app.post('/api/analyze-recording', upload.single('audio'), async (request, response) => {
+  if (!request.file) {
+    response.status(400).json({ error: 'Audio recording is required.' });
+    return;
+  }
+
+  if (!openai) {
+    response.status(400).json({ error: 'OPENAI_API_KEY is required for recording analysis.' });
+    return;
+  }
+
+  try {
+    const transcriptDraft = String(request.body?.transcript || '').trim();
+    const transcript = (await transcribeAudioWithOpenAI(request.file)) || transcriptDraft;
+
+    if (!transcript) {
+      response.status(400).json({ error: 'The recording could not be transcribed.' });
+      return;
+    }
+
+    const analysis = await analyzeTranscriptWithPreferredModel(transcript);
+
+    response.json({
+      transcript,
+      textAnalysis: {
+        ...analysis,
+        model: getAnalysisModelName()
+      },
+      transcription: {
+        source: 'openai-audio',
+        model: openAiTranscriptionModel
+      },
+      analyzedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: 'Recording analysis failed.',
+      details: error instanceof Error ? error.message : 'Unknown error.'
+    });
+  }
 });
 
 app.post('/api/analyze-text', async (request, response) => {
@@ -32,13 +125,11 @@ app.post('/api/analyze-text', async (request, response) => {
   }
 
   try {
-    const analysis = anthropic
-      ? await analyzeTranscriptWithClaude(transcript)
-      : analyzeTranscriptHeuristically(transcript);
+    const analysis = await analyzeTranscriptWithPreferredModel(transcript);
 
     response.json({
       ...analysis,
-      model: analysis.source === 'claude' ? anthropicModel : 'local-heuristic',
+      model: getAnalysisModelName(),
       analyzedAt: new Date().toISOString()
     });
   } catch (error) {
@@ -56,6 +147,43 @@ app.get('*', (_request, response) => {
 app.listen(port, () => {
   console.log(`Ellipsis Health MVP listening on http://localhost:${port}`);
 });
+
+function getAnalysisModelName() {
+  if (openai) {
+    return openAiAnalysisModel;
+  }
+
+  if (anthropic) {
+    return anthropicModel;
+  }
+
+  return 'local-heuristic';
+}
+
+async function transcribeAudioWithOpenAI(file) {
+  const audioFile = await toFile(file.buffer, file.originalname || 'voice-note.webm', {
+    type: file.mimetype || 'audio/webm'
+  });
+
+  const transcript = await openai.audio.transcriptions.create({
+    file: audioFile,
+    model: openAiTranscriptionModel
+  });
+
+  return String(transcript.text || '').trim();
+}
+
+async function analyzeTranscriptWithPreferredModel(transcript) {
+  if (openai) {
+    return analyzeTranscriptWithOpenAI(transcript);
+  }
+
+  if (anthropic) {
+    return analyzeTranscriptWithClaude(transcript);
+  }
+
+  return analyzeTranscriptHeuristically(transcript);
+}
 
 function analyzeTranscriptHeuristically(transcript) {
   const text = transcript.toLowerCase();
@@ -96,28 +224,91 @@ function analyzeTranscriptHeuristically(transcript) {
 
   const rankedScores = Object.entries(scores).sort((left, right) => right[1] - left[1]);
   const dominant = rankedScores[0];
+  const emotionalState = dominant?.[1] > 0 ? dominant[0] : 'steady';
   const hasMixedCues = rankedScores[1] && dominant[1] > 0 && Math.abs(dominant[1] - rankedScores[1][1]) <= 0.25;
   const negativity = Math.min(1, (scores.depression + scores.anxiety + scores.stress) / 4.5);
   const concernLevel = negativity >= 0.8 ? 'high' : negativity >= 0.28 ? 'moderate' : 'low';
 
   return {
     source: 'heuristic',
-    emotionalState: dominant[1] > 0 ? (hasMixedCues ? 'mixed distress' : dominant[0]) : 'steady',
+    emotionalState: dominant?.[1] > 0 ? (hasMixedCues ? 'mixed distress' : emotionalState) : 'steady',
     concernLevel,
     sentimentScore: Number((0.15 - negativity).toFixed(2)),
-    rationale: dominant[1] > 0
+    rationale: dominant?.[1] > 0
       ? hasMixedCues
         ? 'Keyword patterns suggest overlapping anxiety, stress, or low-mood cues.'
-        : `Keyword patterns suggest ${dominant[0]} cues in the transcript.`
+        : `Keyword patterns suggest ${emotionalState} cues in the transcript.`
       : 'Transcript appears broadly neutral with limited distress language.',
+    feedback: concernLevel === 'high'
+      ? 'Your recording suggests a heavier emotional load today. Keep expectations narrow and reduce nonessential pressure where possible.'
+      : concernLevel === 'moderate'
+        ? 'Your recording suggests some strain today. A small reset and a lower-friction plan could help stabilize the day.'
+        : 'Your recording sounds relatively steady today. Keep the routine that is helping you stay grounded.',
+    wellnessTips: buildHeuristicTips({ concernLevel, emotionalState }),
     supportiveMessage: concernLevel === 'high'
-      ? 'Consider surfacing supportive resources or suggesting the user check in with someone they trust.'
+      ? 'Consider checking in with someone you trust if the strain keeps building.'
       : 'Encourage another short check-in tomorrow to build a trend line.'
   };
 }
 
 function keywordScore(text, words) {
   return words.reduce((score, entry) => score + (text.includes(entry.cue) ? entry.weight : 0), 0);
+}
+
+async function analyzeTranscriptWithOpenAI(transcript) {
+  const completion = await openai.chat.completions.create({
+    model: openAiAnalysisModel,
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You analyze short daily mental wellness voice-note transcripts for a hackathon MVP.',
+          'You are not diagnosing or making medical claims.',
+          'Return valid JSON only with keys emotionalState, concernLevel, sentimentScore, rationale, feedback, wellnessTips, supportiveMessage.',
+          'wellnessTips must be an array of 2 or 3 short practical tips.'
+        ].join(' ')
+      },
+      {
+        role: 'user',
+        content: [
+          'Transcript:',
+          transcript,
+          '',
+          'Requirements:',
+          '- concernLevel must be one of low, moderate, high',
+          '- sentimentScore must be a number from -1 to 1',
+          '- rationale must be under 35 words',
+          '- feedback must be under 45 words and sound supportive but direct',
+          '- wellnessTips must contain 2 or 3 items, each under 18 words',
+          '- supportiveMessage must be under 30 words',
+          '- no markdown, no code fences'
+        ].join('\n')
+      }
+    ]
+  });
+
+  let parsed;
+  try {
+    parsed = JSON.parse(stripJsonEnvelope(completion.choices[0]?.message?.content || '{}'));
+  } catch {
+    return {
+      ...analyzeTranscriptHeuristically(transcript),
+      source: 'heuristic'
+    };
+  }
+
+  return {
+    source: 'openai',
+    emotionalState: String(parsed.emotionalState || 'steady'),
+    concernLevel: normalizeConcernLevel(parsed.concernLevel),
+    sentimentScore: clampNumber(parsed.sentimentScore, -1, 1),
+    rationale: String(parsed.rationale || 'GPT analyzed the transcript for emotional cues.'),
+    feedback: String(parsed.feedback || 'The recording suggests a useful moment to pause and choose one supportive next step.'),
+    wellnessTips: normalizeTips(parsed.wellnessTips),
+    supportiveMessage: String(parsed.supportiveMessage || 'Invite the user to check in again tomorrow.')
+  };
 }
 
 async function analyzeTranscriptWithClaude(transcript) {
@@ -128,7 +319,8 @@ async function analyzeTranscriptWithClaude(transcript) {
     system: [
       'You analyze short daily mental wellness voice-note transcripts for a hackathon MVP.',
       'You are not diagnosing or making medical claims.',
-      'Return only valid JSON with keys: emotionalState, concernLevel, sentimentScore, rationale, supportiveMessage.'
+      'Return only valid JSON with keys: emotionalState, concernLevel, sentimentScore, rationale, feedback, wellnessTips, supportiveMessage.',
+      'wellnessTips must be an array of 2 or 3 short practical tips.'
     ].join(' '),
     messages: [
       {
@@ -144,6 +336,8 @@ async function analyzeTranscriptWithClaude(transcript) {
               '- concernLevel must be one of low, moderate, high',
               '- sentimentScore must be a number from -1 to 1',
               '- rationale must be under 35 words',
+              '- feedback must be under 45 words and sound supportive but direct',
+              '- wellnessTips must contain 2 or 3 items, each under 18 words',
               '- supportiveMessage must be under 30 words',
               '- no markdown, no code fences'
             ].join('\n')
@@ -175,6 +369,8 @@ async function analyzeTranscriptWithClaude(transcript) {
     concernLevel: normalizeConcernLevel(parsed.concernLevel),
     sentimentScore: clampNumber(parsed.sentimentScore, -1, 1),
     rationale: String(parsed.rationale || 'Claude analyzed the transcript for emotional cues.'),
+    feedback: String(parsed.feedback || 'The recording suggests a useful moment to slow down and choose one supportive action.'),
+    wellnessTips: normalizeTips(parsed.wellnessTips),
     supportiveMessage: String(parsed.supportiveMessage || 'Invite the user to check in again tomorrow.')
   };
 }
@@ -201,12 +397,67 @@ function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, Number(parsed.toFixed(2))));
 }
 
-function isConfiguredAnthropicKey(key) {
+function normalizeTips(value) {
+  if (Array.isArray(value)) {
+    const cleaned = value
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+    if (cleaned.length >= 2) {
+      return cleaned;
+    }
+  }
+
+  return [
+    'Pause for one slow minute of breathing.',
+    'Shrink the next task to one manageable step.',
+    'Check in again later if the strain increases.'
+  ];
+}
+
+function buildHeuristicTips({ concernLevel, emotionalState }) {
+  if (concernLevel === 'high') {
+    return [
+      'Reduce today to one or two essential tasks.',
+      'Reach out to someone you trust for support.',
+      'Step away briefly and reset your breathing.'
+    ];
+  }
+
+  if (concernLevel === 'moderate') {
+    return emotionalState === 'anxiety' || emotionalState === 'mixed distress'
+      ? [
+          'Slow your breathing for one minute.',
+          'Write the next smallest task only.',
+          'Limit one avoidable stress trigger today.'
+        ]
+      : [
+          'Take a short walk or body reset.',
+          'Keep your next step simple and concrete.',
+          'Check in again tonight for any change.'
+        ];
+  }
+
+  return [
+    'Keep the routine that is helping today.',
+    'Protect one short recovery break later.',
+    'Record another check-in tomorrow for trend tracking.'
+  ];
+}
+
+function isConfiguredApiKey(key) {
   if (!key) {
     return false;
   }
 
   const normalized = key.toLowerCase();
-  const placeholders = new Set(['your_api_key_here', 'your-api-key-here', 'changeme']);
+  const placeholders = new Set([
+    'your_api_key_here',
+    'your-api-key-here',
+    'your_openai_api_key_here',
+    'changeme'
+  ]);
+
   return !placeholders.has(normalized);
 }

@@ -430,6 +430,33 @@ textarea:focus {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.guidance-card {
+  padding: 1rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.guidance-card h4,
+.guidance-card p,
+.tips-list {
+  margin: 0;
+}
+
+.guidance-card p {
+  margin-top: 0.45rem;
+  color: var(--ink-soft);
+}
+
+.tips-list {
+  margin-top: 0.8rem;
+  padding-left: 1.2rem;
+  color: var(--ink);
+}
+
+.tips-list li + li {
+  margin-top: 0.45rem;
+}
+
 .history-list {
   display: grid;
   gap: 0.9rem;
