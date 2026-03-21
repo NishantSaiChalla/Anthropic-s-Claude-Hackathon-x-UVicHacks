@@ -4,6 +4,9 @@ const SPEECH_WARNING_MESSAGE = 'Browser speech recognition is unavailable. Recor
 
 const RECORDING_MODE = 'record';
 const UPLOAD_MODE = 'upload';
+const BASIC_ANALYSIS = 'basic';
+const ADVANCED_ANALYSIS = 'advanced';
+const DIRECT_ANALYSIS = 'direct';
 
 const elements = {
   startButton: document.querySelector('#startButton'),
@@ -40,6 +43,10 @@ const elements = {
   textNarrative: document.querySelector('#textNarrative'),
   feedbackNarrative: document.querySelector('#feedbackNarrative'),
   tipsList: document.querySelector('#tipsList'),
+  analysisBasicButton: document.querySelector('#analysisBasicButton'),
+  analysisAdvancedButton: document.querySelector('#analysisAdvancedButton'),
+  analysisDirectButton: document.querySelector('#analysisDirectButton'),
+  analysisModeHint: document.querySelector('#analysisModeHint'),
   historyList: document.querySelector('#historyList'),
   sparklineWrap: document.querySelector('#sparklineWrap'),
   historySparkline: document.querySelector('#historySparkline'),
@@ -63,6 +70,7 @@ let sourceNode = null;
 let isTranscribing = false;
 let hasRecordedTranscription = false;
 let captureMode = RECORDING_MODE;
+let analysisMode = ADVANCED_ANALYSIS;
 let serverCapabilities = {
   openAiConfigured: false,
   anthropicConfigured: false,
@@ -86,6 +94,9 @@ function wireEvents() {
   });
   elements.modeRecordButton.addEventListener('click', () => setCaptureMode(RECORDING_MODE));
   elements.modeUploadButton.addEventListener('click', () => setCaptureMode(UPLOAD_MODE));
+  elements.analysisBasicButton.addEventListener('click', () => setAnalysisMode(BASIC_ANALYSIS));
+  elements.analysisAdvancedButton.addEventListener('click', () => setAnalysisMode(ADVANCED_ANALYSIS));
+  elements.analysisDirectButton.addEventListener('click', () => setAnalysisMode(DIRECT_ANALYSIS));
   elements.chooseFileButton.addEventListener('click', () => elements.audioUploadInput.click());
   elements.audioUploadInput.addEventListener('change', (event) => {
     const file = event.target.files?.[0];
@@ -130,6 +141,22 @@ function setCaptureMode(mode) {
   }
 
   refreshCapabilityWarnings();
+}
+
+function setAnalysisMode(mode) {
+  analysisMode = mode;
+  elements.analysisBasicButton.classList.toggle('active', mode === BASIC_ANALYSIS);
+  elements.analysisBasicButton.setAttribute('aria-selected', String(mode === BASIC_ANALYSIS));
+  elements.analysisAdvancedButton.classList.toggle('active', mode === ADVANCED_ANALYSIS);
+  elements.analysisAdvancedButton.setAttribute('aria-selected', String(mode === ADVANCED_ANALYSIS));
+  elements.analysisDirectButton.classList.toggle('active', mode === DIRECT_ANALYSIS);
+  elements.analysisDirectButton.setAttribute('aria-selected', String(mode === DIRECT_ANALYSIS));
+  const hints = {
+    [BASIC_ANALYSIS]: 'Fast keyword-based analysis — works without an API key',
+    [ADVANCED_ANALYSIS]: 'GPT-powered emotional analysis with personalised feedback and tips',
+    [DIRECT_ANALYSIS]: 'GPT-4o hears your voice directly — captures tone, pace, and emotion beyond words'
+  };
+  elements.analysisModeHint.textContent = hints[mode] || '';
 }
 
 function setupDropZone() {
@@ -357,14 +384,18 @@ async function analyzeEntry() {
   }
 
   elements.analysisStatus.textContent = serverCapabilities.openAiConfigured
-    ? 'Uploading audio for GPT transcription and analysis...'
-    : 'Analyzing vocal cues and transcript sentiment...';
+    ? analysisMode === DIRECT_ANALYSIS
+      ? 'Sending audio directly to GPT-4o for vocal and emotional analysis...'
+      : analysisMode === ADVANCED_ANALYSIS
+        ? 'Uploading audio for GPT transcription and analysis...'
+        : 'Uploading audio for transcription — basic analysis running...'
+    : 'Analyzing vocal cues with keyword matching...';
   elements.analyzeButton.disabled = true;
 
   try {
     const recordingAnalysis = serverCapabilities.openAiConfigured
-      ? await analyzeRecording(audioBlob, transcriptDraft)
-      : { transcript: transcriptDraft, textAnalysis: await analyzeTranscript(transcriptDraft) };
+      ? await analyzeRecording(audioBlob, transcriptDraft, analysisMode)
+      : { transcript: transcriptDraft, textAnalysis: await analyzeTranscript(transcriptDraft, analysisMode) };
     const transcript = normalizeTranscript(recordingAnalysis.transcript || transcriptDraft);
 
     if (!transcript) {
@@ -385,19 +416,19 @@ async function analyzeEntry() {
     elements.analysisStatus.textContent = 'Analysis complete.';
   } catch (error) {
     console.error(error);
-    elements.analysisStatus.textContent = 'Analysis failed. Check your server and API configuration.';
+    elements.analysisStatus.textContent = `Analysis failed: ${error.message || 'Check your server and API configuration.'}`;
   } finally {
     elements.analyzeButton.disabled = false;
   }
 }
 
-async function analyzeTranscript(transcript) {
+async function analyzeTranscript(transcript, mode = ADVANCED_ANALYSIS) {
   const response = await fetch('/api/analyze-text', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ transcript })
+    body: JSON.stringify({ transcript, mode })
   });
 
   if (!response.ok) {
@@ -405,15 +436,17 @@ async function analyzeTranscript(transcript) {
     throw new Error(payload.error || 'Transcript analysis failed.');
   }
 
-  return response.json();
+  const payload = await response.json();
+  return normalizeAnalysisPayload(payload);
 }
 
-async function analyzeRecording(blob, transcriptDraft) {
+async function analyzeRecording(blob, transcriptDraft, mode = ADVANCED_ANALYSIS) {
   const formData = new FormData();
   formData.append('audio', blob, audioFileName || buildRecordingFilename(blob));
   if (transcriptDraft) {
     formData.append('transcript', transcriptDraft);
   }
+  formData.append('mode', mode);
 
   const response = await fetch('/api/analyze-recording', {
     method: 'POST',
@@ -422,10 +455,14 @@ async function analyzeRecording(blob, transcriptDraft) {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || 'Recording analysis failed.');
+    throw new Error(payload.details || payload.error || 'Recording analysis failed.');
   }
 
-  return response.json();
+  const payload = await response.json();
+  return {
+    ...payload,
+    textAnalysis: normalizeAnalysisPayload(payload.textAnalysis || {})
+  };
 }
 
 async function extractAudioMetrics(blob, transcript) {
@@ -517,6 +554,7 @@ function combineSignals(vocalMetrics, textAnalysis) {
 }
 
 function renderResult(combined, vocalMetrics, textAnalysis) {
+  const normalizedAnalysis = normalizeAnalysisPayload(textAnalysis);
   elements.resultEmpty.hidden = true;
   elements.resultCard.hidden = false;
   elements.resultCard.dataset.level = combined.level;
@@ -528,16 +566,16 @@ function renderResult(combined, vocalMetrics, textAnalysis) {
   elements.resultHeadline.textContent = combined.headline;
   elements.resultSummary.textContent = combined.summary;
   elements.vocalScore.textContent = vocalMetrics.vocalScore.toFixed(2);
-  elements.textScore.textContent = textAnalysis.sentimentScore.toFixed(2);
+  elements.textScore.textContent = normalizedAnalysis.sentimentScore.toFixed(2);
   elements.paceScore.textContent = `${vocalMetrics.wordsPerMinute} wpm`;
   elements.vocalNarrative.textContent = [
     `Energy variance: ${vocalMetrics.energyVariance}.`,
     `Silence ratio: ${vocalMetrics.silenceRatio}.`,
     `Interpretation: ${vocalMetrics.vocalLabel}.`
   ].join(' ');
-  elements.textNarrative.textContent = `${textAnalysis.rationale} ${textAnalysis.supportiveMessage}`;
-  elements.feedbackNarrative.textContent = textAnalysis.feedback || 'Take one supportive step and check back in later today.';
-  renderTips(textAnalysis.wellnessTips, vocalMetrics);
+  elements.textNarrative.textContent = `${normalizedAnalysis.rationale} ${normalizedAnalysis.supportiveMessage}`;
+  elements.feedbackNarrative.textContent = normalizedAnalysis.feedback;
+  renderTips(normalizedAnalysis.wellnessTips, vocalMetrics);
 }
 
 function storeHistory(combined, vocalMetrics, textAnalysis, transcript) {
@@ -901,6 +939,28 @@ async function requestRecordingTranscription(blob) {
 
 function normalizeTranscript(text) {
   return text.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeAnalysisPayload(textAnalysis) {
+  const fallbackTips = [
+    'Pause for one slow minute of breathing.',
+    'Shrink the next task to one manageable step.',
+    'Check in again later if the strain increases.'
+  ];
+
+  const normalizedTips = Array.isArray(textAnalysis?.wellnessTips)
+    ? textAnalysis.wellnessTips.map((tip) => String(tip || '').trim()).filter(Boolean).slice(0, 3)
+    : [];
+
+  return {
+    emotionalState: String(textAnalysis?.emotionalState || 'steady'),
+    concernLevel: String(textAnalysis?.concernLevel || 'low'),
+    sentimentScore: Number.isFinite(Number(textAnalysis?.sentimentScore)) ? Number(textAnalysis.sentimentScore) : 0,
+    rationale: String(textAnalysis?.rationale || 'The transcript was analyzed for emotional cues.'),
+    feedback: String(textAnalysis?.feedback || textAnalysis?.supportiveMessage || 'Take one supportive step and check back in later today.'),
+    wellnessTips: normalizedTips.length ? normalizedTips : fallbackTips,
+    supportiveMessage: String(textAnalysis?.supportiveMessage || 'Check in again tomorrow to keep building a trend line.')
+  };
 }
 
 function renderTips(tips, vocalMetrics) {

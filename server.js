@@ -23,6 +23,7 @@ const port = Number(process.env.PORT || 3000);
 const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
 const openAiTranscriptionModel = process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe';
 const openAiAnalysisModel = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4.1-mini';
+const openAiAudioModel = process.env.OPENAI_AUDIO_MODEL || 'gpt-4o-audio-preview';
 const anthropicApiKey = String(process.env.ANTHROPIC_API_KEY || '').trim();
 const anthropicModel = process.env.ANTHROPIC_MODEL || 'claude-3-7-sonnet-latest';
 
@@ -87,6 +88,19 @@ app.post('/api/analyze-recording', upload.single('audio'), async (request, respo
 
   try {
     const transcriptDraft = String(request.body?.transcript || '').trim();
+    const mode = String(request.body?.mode || 'advanced');
+
+    if (mode === 'direct') {
+      const directResult = await analyzeAudioDirectly(request.file);
+      response.json({
+        transcript: directResult.transcript,
+        textAnalysis: { ...directResult.analysis, model: openAiAudioModel },
+        transcription: { source: 'openai-audio-direct', model: openAiAudioModel },
+        analyzedAt: new Date().toISOString()
+      });
+      return;
+    }
+
     const transcript = (await transcribeAudioWithOpenAI(request.file)) || transcriptDraft;
 
     if (!transcript) {
@@ -94,7 +108,7 @@ app.post('/api/analyze-recording', upload.single('audio'), async (request, respo
       return;
     }
 
-    const analysis = await analyzeTranscriptWithPreferredModel(transcript);
+    const analysis = await analyzeTranscriptWithPreferredModel(transcript, mode);
 
     response.json({
       transcript,
@@ -125,7 +139,7 @@ app.post('/api/analyze-text', async (request, response) => {
   }
 
   try {
-    const analysis = await analyzeTranscriptWithPreferredModel(transcript);
+    const analysis = await analyzeTranscriptWithPreferredModel(transcript, String(request.body?.mode || 'advanced'));
 
     response.json({
       ...analysis,
@@ -147,6 +161,83 @@ app.get('*', (_request, response) => {
 app.listen(port, () => {
   console.log(`Ellipsis Health MVP listening on http://localhost:${port}`);
 });
+
+async function analyzeAudioDirectly(file) {
+  const base64 = file.buffer.toString('base64');
+  const fmt = getAudioFormat(file.mimetype);
+
+  const completion = await openai.chat.completions.create({
+    model: openAiAudioModel,
+    modalities: ['text'],
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You analyze short daily mental wellness voice-note recordings for a hackathon MVP.',
+          'Listen to the audio directly. Pay attention not just to the words spoken, but also to vocal',
+          'tone, pace, energy level, hesitations, tremors, and emotional quality in the voice itself.',
+          'You are not diagnosing or making medical claims.',
+          'Respond with a single raw JSON object — no markdown, no code fences — with keys:',
+          'transcript, emotionalState, concernLevel, sentimentScore, rationale, feedback, wellnessTips, supportiveMessage.',
+          'transcript must be the verbatim speech content. wellnessTips must be an array of 2 or 3 short practical tips.'
+        ].join(' ')
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_audio',
+            input_audio: { data: base64, format: fmt }
+          },
+          {
+            type: 'text',
+            text: [
+              'Transcribe and analyze this voice note. Return only a raw JSON object.',
+              'Requirements:',
+              '- concernLevel must be one of low, moderate, high',
+              '- sentimentScore must be a number from -1 to 1',
+              '- rationale must mention both vocal delivery AND content, under 40 words',
+              '- feedback must be under 45 words and sound supportive but direct',
+              '- wellnessTips must contain 2 or 3 items, each under 18 words',
+              '- supportiveMessage must be under 30 words',
+              '- no markdown, no code fences, no extra text'
+            ].join('\n')
+          }
+        ]
+      }
+    ]
+  });
+
+  let parsed;
+  try {
+    parsed = JSON.parse(stripJsonEnvelope(completion.choices[0]?.message?.content || '{}'));
+  } catch {
+    return {
+      transcript: '',
+      analysis: { ...analyzeTranscriptHeuristically(''), source: 'heuristic' }
+    };
+  }
+
+  return {
+    transcript: String(parsed.transcript || '').trim(),
+    analysis: {
+      source: 'openai-audio-direct',
+      emotionalState: String(parsed.emotionalState || 'steady'),
+      concernLevel: normalizeConcernLevel(parsed.concernLevel),
+      sentimentScore: clampNumber(parsed.sentimentScore, -1, 1),
+      rationale: String(parsed.rationale || 'GPT-4o analyzed the audio recording directly.'),
+      feedback: String(parsed.feedback || 'Take one supportive step and check back in later.'),
+      wellnessTips: normalizeTips(parsed.wellnessTips),
+      supportiveMessage: String(parsed.supportiveMessage || 'Check in again tomorrow to build a trend.')
+    }
+  };
+}
+
+function getAudioFormat(mimetype) {
+  const base = String(mimetype || 'audio/webm').split(';')[0].split('/')[1] || 'webm';
+  const aliases = { mpeg: 'mp3', 'x-wav': 'wav', 'x-m4a': 'm4a' };
+  return aliases[base] || base;
+}
 
 function getAnalysisModelName() {
   if (openai) {
@@ -173,7 +264,11 @@ async function transcribeAudioWithOpenAI(file) {
   return String(transcript.text || '').trim();
 }
 
-async function analyzeTranscriptWithPreferredModel(transcript) {
+async function analyzeTranscriptWithPreferredModel(transcript, mode = 'advanced') {
+  if (mode === 'basic') {
+    return analyzeTranscriptHeuristically(transcript);
+  }
+
   if (openai) {
     return analyzeTranscriptWithOpenAI(transcript);
   }
