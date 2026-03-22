@@ -45,8 +45,6 @@ const elements = {
   emotionModelLabel: document.querySelector('#emotionModelLabel'),
   emotionBars: document.querySelector('#emotionBars'),
   emotionDominant: document.querySelector('#emotionDominant'),
-  analysisAdvancedButton: document.querySelector('#analysisAdvancedButton'),
-  analysisModeHint: document.querySelector('#analysisModeHint'),
   historyList: document.querySelector('#historyList'),
   sparklineWrap: document.querySelector('#sparklineWrap'),
   historySparkline: document.querySelector('#historySparkline'),
@@ -120,7 +118,6 @@ function wireEvents() {
   elements.modeTalkButton.addEventListener('click', () => setCaptureMode(TALK_MODE));
   elements.talkMicButton.addEventListener('click', startUserListening);
   elements.endTalkButton.addEventListener('click', endTalkSession);
-  elements.analysisAdvancedButton.addEventListener('click', () => setAnalysisMode(ADVANCED_ANALYSIS));
   elements.deepSummaryToggle.addEventListener('click', () => {
     const isOpen = !elements.deepSummarySection.hidden;
     elements.deepSummarySection.hidden = isOpen;
@@ -188,12 +185,6 @@ function setCaptureMode(mode) {
   refreshCapabilityWarnings();
 }
 
-function setAnalysisMode(mode) {
-  analysisMode = mode;
-  elements.analysisAdvancedButton.classList.toggle('active', mode === ADVANCED_ANALYSIS);
-  elements.analysisAdvancedButton.setAttribute('aria-selected', String(mode === ADVANCED_ANALYSIS));
-  elements.analysisModeHint.textContent = 'GPT-powered emotional analysis with personalised feedback and tips';
-}
 
 function setupDropZone() {
   const zone = elements.uploadDropZone;
@@ -616,20 +607,20 @@ function combineSignals(vocalMetrics, textAnalysis) {
 
   if (combinedScore >= 3.3) {
     level = 'high';
-    headline = 'It sounds like today is a really tough day for you.';
+    headline = 'What you\'re feeling right now is real, and it matters.';
   } else if (combinedScore >= 1.6) {
     level = 'elevated';
-    headline = 'It sounds like you\'re carrying a bit of weight today.';
+    headline = 'It sounds like you\'re carrying something heavy today.';
   } else {
-    headline = 'It sounds like you\'re doing okay today.';
+    headline = 'You\'re holding up — and that\'s worth acknowledging.';
   }
 
   const isVocalMeasuredSummary = vocalMetrics.vocalLabel !== 'not measured';
   const summary = [
     isVocalMeasuredSummary
-      ? `Your voice sounded ${vocalMetrics.vocalLabel} with a ${vocalMetrics.pacingLabel} speaking pace.`
-      : 'I listened to what you wrote instead of your voice today.',
-    `Underneath it all, I'm hearing some ${textAnalysis.emotionalState} feelings.`
+      ? `Your voice came through ${vocalMetrics.vocalLabel}, with a ${vocalMetrics.pacingLabel} pace.`
+      : 'Thank you for sharing this — I read through what you wrote carefully.',
+    `I\'m picking up on some ${textAnalysis.emotionalState} in what you shared.`
   ].join(' ');
 
   return {
@@ -646,10 +637,10 @@ function renderResult(combined, vocalMetrics, textAnalysis) {
   elements.resultCard.hidden = false;
   elements.resultCard.dataset.level = combined.level;
   elements.resultBanner.textContent = combined.level === 'high'
-    ? 'Needs some TLC'
+    ? 'You deserve support'
     : combined.level === 'elevated'
-      ? 'Checking in'
-      : 'Doing alright';
+      ? 'You\'re carrying a lot'
+      : 'You\'re doing well';
   elements.resultHeadline.textContent = combined.headline;
   elements.resultSummary.textContent = combined.summary;
   elements.feedbackNarrative.textContent = normalizedAnalysis.feedback;
