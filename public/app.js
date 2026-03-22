@@ -502,12 +502,13 @@ function conversationVocalMetrics(transcript) {
 }
 
 async function analyzeTranscript(transcript, mode = ADVANCED_ANALYSIS) {
+  const historyStr = JSON.stringify(readHistory().slice(0, 7));
   const response = await fetch('/api/analyze-text', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ transcript, mode })
+    body: JSON.stringify({ transcript, mode, history: historyStr })
   });
 
   if (!response.ok) {
@@ -526,6 +527,7 @@ async function analyzeRecording(blob, transcriptDraft, mode = ADVANCED_ANALYSIS)
     formData.append('transcript', transcriptDraft);
   }
   formData.append('mode', mode);
+  formData.append('history', JSON.stringify(readHistory().slice(0, 7)));
 
   const response = await fetch('/api/analyze-recording', {
     method: 'POST',
