@@ -490,6 +490,51 @@ textarea:focus {
   margin-top: 0.45rem;
 }
 
+.deep-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(23, 36, 47, 0.18);
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+  width: fit-content;
+}
+
+.deep-toggle-btn:hover {
+  background: rgba(23, 36, 47, 0.06);
+  color: var(--ink);
+}
+
+.deep-toggle-btn.open {
+  color: var(--ink);
+}
+
+.deep-summary-section {
+  display: grid;
+  gap: 1rem;
+}
+
+.rationale-card {
+  padding: 1rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.rationale-card h4 {
+  margin: 0 0 0.3rem;
+}
+
+.rationale-card p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
 .emotion-detection-card {
   padding: 1rem;
   border-radius: 22px;

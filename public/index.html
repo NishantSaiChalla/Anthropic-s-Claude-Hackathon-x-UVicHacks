@@ -126,9 +126,7 @@
           <div class="analysis-mode-row">
             <span class="field-label">Analysis depth</span>
             <div class="mode-toggle" role="tablist" aria-label="Analysis depth">
-              <button id="analysisBasicButton" class="mode-button" type="button" role="tab" aria-selected="false">Basic</button>
               <button id="analysisAdvancedButton" class="mode-button active" type="button" role="tab" aria-selected="true">Advanced</button>
-              <button id="analysisDirectButton" class="mode-button" type="button" role="tab" aria-selected="false">Direct audio</button>
             </div>
             <p id="analysisModeHint" class="analysis-mode-hint">GPT-powered emotional analysis with personalised feedback and tips</p>
           </div>
@@ -156,16 +154,25 @@
             <h3 id="resultHeadline">Your signals look balanced today.</h3>
             <p id="resultSummary"></p>
 
-            <div class="emotion-detection-card" id="emotionCard" hidden>
-              <h4>ML Emotion Detection</h4>
-              <p class="emotion-model-label" id="emotionModelLabel"></p>
-              <div class="emotion-bars" id="emotionBars"></div>
-              <p class="emotion-dominant" id="emotionDominant"></p>
-            </div>
             <div class="guidance-card">
               <h4>Feedback and tips</h4>
               <p id="feedbackNarrative"></p>
               <ul id="tipsList" class="tips-list"></ul>
+            </div>
+
+            <button id="deepSummaryToggle" class="deep-toggle-btn" type="button">See deeper analysis ▾</button>
+
+            <div id="deepSummarySection" class="deep-summary-section" hidden>
+              <div class="emotion-detection-card" id="emotionCard" hidden>
+                <h4>ML Emotion Detection</h4>
+                <p class="emotion-model-label" id="emotionModelLabel"></p>
+                <div class="emotion-bars" id="emotionBars"></div>
+                <p class="emotion-dominant" id="emotionDominant"></p>
+              </div>
+              <div class="rationale-card">
+                <h4>What we noticed</h4>
+                <p id="rationaleText"></p>
+              </div>
             </div>
           </div>
         </section>

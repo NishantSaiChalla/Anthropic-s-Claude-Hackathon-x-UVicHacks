@@ -5,9 +5,7 @@ const SPEECH_WARNING_MESSAGE = 'Browser speech recognition is unavailable. Recor
 const RECORDING_MODE = 'record';
 const UPLOAD_MODE = 'upload';
 const TALK_MODE = 'talk';
-const BASIC_ANALYSIS = 'basic';
 const ADVANCED_ANALYSIS = 'advanced';
-const DIRECT_ANALYSIS = 'direct';
 
 const elements = {
   startButton: document.querySelector('#startButton'),
@@ -40,13 +38,14 @@ const elements = {
 
   feedbackNarrative: document.querySelector('#feedbackNarrative'),
   tipsList: document.querySelector('#tipsList'),
+  deepSummaryToggle: document.querySelector('#deepSummaryToggle'),
+  deepSummarySection: document.querySelector('#deepSummarySection'),
+  rationaleText: document.querySelector('#rationaleText'),
   emotionCard: document.querySelector('#emotionCard'),
   emotionModelLabel: document.querySelector('#emotionModelLabel'),
   emotionBars: document.querySelector('#emotionBars'),
   emotionDominant: document.querySelector('#emotionDominant'),
-  analysisBasicButton: document.querySelector('#analysisBasicButton'),
   analysisAdvancedButton: document.querySelector('#analysisAdvancedButton'),
-  analysisDirectButton: document.querySelector('#analysisDirectButton'),
   analysisModeHint: document.querySelector('#analysisModeHint'),
   historyList: document.querySelector('#historyList'),
   sparklineWrap: document.querySelector('#sparklineWrap'),
@@ -121,9 +120,13 @@ function wireEvents() {
   elements.modeTalkButton.addEventListener('click', () => setCaptureMode(TALK_MODE));
   elements.talkMicButton.addEventListener('click', startUserListening);
   elements.endTalkButton.addEventListener('click', endTalkSession);
-  elements.analysisBasicButton.addEventListener('click', () => setAnalysisMode(BASIC_ANALYSIS));
   elements.analysisAdvancedButton.addEventListener('click', () => setAnalysisMode(ADVANCED_ANALYSIS));
-  elements.analysisDirectButton.addEventListener('click', () => setAnalysisMode(DIRECT_ANALYSIS));
+  elements.deepSummaryToggle.addEventListener('click', () => {
+    const isOpen = !elements.deepSummarySection.hidden;
+    elements.deepSummarySection.hidden = isOpen;
+    elements.deepSummaryToggle.textContent = isOpen ? 'See deeper analysis ▾' : 'Hide deeper analysis ▴';
+    elements.deepSummaryToggle.classList.toggle('open', !isOpen);
+  });
   elements.chooseFileButton.addEventListener('click', () => elements.audioUploadInput.click());
   elements.audioUploadInput.addEventListener('change', (event) => {
     const file = event.target.files?.[0];
@@ -187,18 +190,9 @@ function setCaptureMode(mode) {
 
 function setAnalysisMode(mode) {
   analysisMode = mode;
-  elements.analysisBasicButton.classList.toggle('active', mode === BASIC_ANALYSIS);
-  elements.analysisBasicButton.setAttribute('aria-selected', String(mode === BASIC_ANALYSIS));
   elements.analysisAdvancedButton.classList.toggle('active', mode === ADVANCED_ANALYSIS);
   elements.analysisAdvancedButton.setAttribute('aria-selected', String(mode === ADVANCED_ANALYSIS));
-  elements.analysisDirectButton.classList.toggle('active', mode === DIRECT_ANALYSIS);
-  elements.analysisDirectButton.setAttribute('aria-selected', String(mode === DIRECT_ANALYSIS));
-  const hints = {
-    [BASIC_ANALYSIS]: 'Fast keyword-based analysis — works without an API key',
-    [ADVANCED_ANALYSIS]: 'GPT-powered emotional analysis with personalised feedback and tips',
-    [DIRECT_ANALYSIS]: 'GPT-4o hears your voice directly — captures tone, pace, and emotion beyond words'
-  };
-  elements.analysisModeHint.textContent = hints[mode] || '';
+  elements.analysisModeHint.textContent = 'GPT-powered emotional analysis with personalised feedback and tips';
 }
 
 function setupDropZone() {
@@ -433,11 +427,7 @@ async function analyzeEntry() {
   }
 
   elements.analysisStatus.textContent = serverCapabilities.openAiConfigured
-    ? analysisMode === DIRECT_ANALYSIS
-      ? 'Sending audio directly to GPT-4o for vocal and emotional analysis...'
-      : analysisMode === ADVANCED_ANALYSIS
-        ? 'Uploading audio for GPT transcription and analysis...'
-        : 'Uploading audio for transcription — basic analysis running...'
+    ? 'Uploading audio for GPT transcription and analysis...'
     : 'Analyzing vocal cues with keyword matching...';
   elements.analyzeButton.disabled = true;
 
@@ -662,6 +652,11 @@ function renderResult(combined, vocalMetrics, textAnalysis) {
   elements.resultSummary.textContent = combined.summary;
   elements.feedbackNarrative.textContent = normalizedAnalysis.feedback;
   renderTips(normalizedAnalysis.wellnessTips, vocalMetrics);
+  elements.rationaleText.textContent = normalizedAnalysis.rationale;
+  // Reset deep section to collapsed on each new analysis
+  elements.deepSummarySection.hidden = true;
+  elements.deepSummaryToggle.textContent = 'See deeper analysis ▾';
+  elements.deepSummaryToggle.classList.remove('open');
 }
 
 function storeHistory(combined, vocalMetrics, textAnalysis, transcript, emotionDetection) {
