@@ -112,8 +112,9 @@ app.post('/api/analyze-recording', upload.single('audio'), async (request, respo
 
     const emotionResult = await detectEmotionsWithHuggingFace(transcript);
     const emotionContext = emotionResult?.dominant?.label || 'neutral';
+    const historyContext = String(request.body?.history || '[]');
     
-    const analysis = await analyzeTranscriptWithPreferredModel(transcript, mode, emotionContext);
+    const analysis = await analyzeTranscriptWithPreferredModel(transcript, mode, emotionContext, historyContext);
 
     response.json({
       transcript,
@@ -148,8 +149,9 @@ app.post('/api/analyze-text', async (request, response) => {
     const mode = String(request.body?.mode || 'advanced');
     const emotionResult = await detectEmotionsWithHuggingFace(transcript);
     const emotionContext = emotionResult?.dominant?.label || 'neutral';
+    const historyContext = String(request.body?.history || '[]');
     
-    const analysis = await analyzeTranscriptWithPreferredModel(transcript, mode, emotionContext);
+    const analysis = await analyzeTranscriptWithPreferredModel(transcript, mode, emotionContext, historyContext);
 
     response.json({
       ...analysis,
@@ -441,13 +443,13 @@ async function transcribeAudioWithOpenAI(file) {
   return String(transcript.text || '').trim();
 }
 
-async function analyzeTranscriptWithPreferredModel(transcript, mode = 'advanced', emotionContext = 'neutral') {
+async function analyzeTranscriptWithPreferredModel(transcript, mode = 'advanced', emotionContext = 'neutral', historyContext = '[]') {
   if (mode === 'basic') {
     return analyzeTranscriptHeuristically(transcript, emotionContext);
   }
 
   if (openai) {
-    return analyzeTranscriptWithOpenAI(transcript, emotionContext);
+    return analyzeTranscriptWithOpenAI(transcript, emotionContext, historyContext);
   }
   return analyzeTranscriptHeuristically(transcript, emotionContext);
 }
@@ -522,7 +524,7 @@ function keywordScore(text, words) {
   return words.reduce((score, entry) => score + (text.includes(entry.cue) ? entry.weight : 0), 0);
 }
 
-async function analyzeTranscriptWithOpenAI(transcript, emotionContext = 'neutral') {
+async function analyzeTranscriptWithOpenAI(transcript, emotionContext = 'neutral', historyContext = '[]') {
   const completion = await openai.chat.completions.create({
     model: openAiAnalysisModel,
     temperature: 0.2,
@@ -551,7 +553,10 @@ async function analyzeTranscriptWithOpenAI(transcript, emotionContext = 'neutral
           '- wellnessTips must contain 2 or 3 very simple, easy actions, each under 18 words',
           '- supportiveMessage must be an encouraging, friendly sign-off (under 30 words)',
           '- no medical jargon, keep it extremely natural and conversational',
-          '- no markdown, no code fences'
+          '- no markdown, no code fences',
+          '',
+          'Recent User Check-in History (for context/spotting trends only, purely informational):',
+          historyContext
         ].join('\n')
       }
     ]
