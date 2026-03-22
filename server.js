@@ -167,6 +167,28 @@ app.post('/api/analyze-text', async (request, response) => {
   }
 });
 
+app.post('/api/generate-program', express.json(), async (request, response) => {
+  const { emotionalState, concernLevel, feedback, history } = request.body || {};
+
+  if (!emotionalState) {
+    response.status(400).json({ error: 'emotionalState is required.' });
+    return;
+  }
+
+  try {
+    const program = await generateActivityProgram(
+      String(emotionalState),
+      String(concernLevel || 'low'),
+      String(feedback || ''),
+      String(history || '[]')
+    );
+    response.json(program);
+  } catch (error) {
+    console.error('Program generation error:', error.message);
+    response.status(500).json({ error: 'Failed to generate programme.' });
+  }
+});
+
 app.post('/api/emotion-detect', async (request, response) => {
   const text = String(request.body?.text || '').trim();
 
@@ -627,6 +649,101 @@ function normalizeTips(value) {
     'Shrink the next task to one manageable step.',
     'Check in again later if the strain increases.'
   ];
+}
+
+async function generateActivityProgram(emotionalState, concernLevel, feedback, historyContext) {
+  if (!openai) {
+    return getFallbackProgram(concernLevel);
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: openAiAnalysisModel,
+    temperature: 0.5,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You create a short daily wellness activity programme for a mental health check-in app.',
+          'You are NOT a therapist and do not diagnose anything.',
+          'Return valid JSON with keys: activities (array of exactly 5 objects), programNote (string).',
+          'Each activity object must have: id (string), title (string), description (string), duration (string), category (string).',
+          'category must be one of: physical, social, rest, creative, mindfulness.',
+          'Activities must be small, specific, and immediately achievable — not aspirational goals.',
+          'No medical advice, no markdown, no code fences.'
+        ].join(' ')
+      },
+      {
+        role: 'user',
+        content: [
+          `Current emotional state: ${emotionalState}`,
+          `Concern level: ${concernLevel}`,
+          `Recent feedback given to user: ${feedback}`,
+          `Check-in history for context: ${historyContext}`,
+          '',
+          'Create exactly 5 daily activities matched to their current emotional state.',
+          '- title: 2–5 words',
+          '- description: one sentence, exactly what to do, under 20 words',
+          '- duration: e.g. "2 min", "5 min", "10 min"',
+          '- id: "a0" through "a4"',
+          '- If concernLevel is high: favour rest and mindfulness, keep durations short',
+          '- If concernLevel is low: include physical and social activities',
+          '- programNote: one sentence explaining why these activities suit their situation right now, under 30 words'
+        ].join('\n')
+      }
+    ]
+  });
+
+  let parsed;
+  try {
+    parsed = JSON.parse(stripJsonEnvelope(completion.choices[0]?.message?.content || '{}'));
+  } catch {
+    return getFallbackProgram(concernLevel);
+  }
+
+  const validCategories = ['physical', 'social', 'rest', 'creative', 'mindfulness'];
+  const activities = Array.isArray(parsed.activities)
+    ? parsed.activities.slice(0, 5).map((a, i) => ({
+        id: `a${i}`,
+        title: String(a.title || `Activity ${i + 1}`),
+        description: String(a.description || ''),
+        duration: String(a.duration || '5 min'),
+        category: validCategories.includes(a.category) ? a.category : 'mindfulness'
+      }))
+    : [];
+
+  if (activities.length < 5) {
+    return getFallbackProgram(concernLevel);
+  }
+
+  return {
+    activities,
+    programNote: String(parsed.programNote || 'These activities are tailored to support you right now.')
+  };
+}
+
+function getFallbackProgram(concernLevel) {
+  const high = concernLevel === 'high';
+  const activities = high ? [
+    { id: 'a0', title: 'Slow morning breath', description: 'Take 5 slow breaths before getting out of bed.', duration: '2 min', category: 'mindfulness' },
+    { id: 'a1', title: 'Step outside briefly', description: 'Stand outside or near a window and breathe fresh air.', duration: '5 min', category: 'rest' },
+    { id: 'a2', title: 'Send one message', description: 'Text one person you trust, even just to say hello.', duration: '2 min', category: 'social' },
+    { id: 'a3', title: 'Drink water slowly', description: 'Drink a full glass of water before your first meal.', duration: '2 min', category: 'physical' },
+    { id: 'a4', title: 'Write one sentence', description: 'Write one honest sentence about how you feel right now.', duration: '3 min', category: 'creative' }
+  ] : [
+    { id: 'a0', title: 'Morning breath reset', description: 'Take 5 slow breaths as soon as you wake up.', duration: '2 min', category: 'mindfulness' },
+    { id: 'a1', title: 'Short outdoor walk', description: 'Walk outside for 10 minutes, without looking at your phone.', duration: '10 min', category: 'physical' },
+    { id: 'a2', title: 'Reach out to someone', description: 'Have a real conversation with a friend or family member today.', duration: '10 min', category: 'social' },
+    { id: 'a3', title: 'Creative expression', description: 'Spend a few minutes drawing, writing, or making something with your hands.', duration: '10 min', category: 'creative' },
+    { id: 'a4', title: 'Phone-free wind-down', description: 'Put your phone away 30 minutes before bed and do something restful.', duration: '30 min', category: 'rest' }
+  ];
+
+  return {
+    activities,
+    programNote: high
+      ? 'These gentle activities are here to help you get through today one small step at a time.'
+      : 'These activities are designed to keep your wellbeing consistent day to day.'
+  };
 }
 
 function buildHeuristicTips({ concernLevel, emotionalState }) {

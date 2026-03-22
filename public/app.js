@@ -1,5 +1,7 @@
 const RECORDING_LIMIT_SECONDS = 30;
 const HISTORY_KEY = 'ellipsis-health-history';
+const PROGRAM_KEY = 'ellipsis-program';
+const COMPLETIONS_KEY = 'ellipsis-program-completions';
 const SPEECH_WARNING_MESSAGE = 'Browser speech recognition is unavailable. Recordings still work, but type your transcript manually.';
 
 const RECORDING_MODE = 'record';
@@ -41,6 +43,11 @@ const elements = {
   deepSummaryToggle: document.querySelector('#deepSummaryToggle'),
   deepSummarySection: document.querySelector('#deepSummarySection'),
   rationaleText: document.querySelector('#rationaleText'),
+  programCard: document.querySelector('#programCard'),
+  programNote: document.querySelector('#programNote'),
+  programMeta: document.querySelector('#programMeta'),
+  programList: document.querySelector('#programList'),
+  programInsight: document.querySelector('#programInsight'),
   emotionCard: document.querySelector('#emotionCard'),
   emotionModelLabel: document.querySelector('#emotionModelLabel'),
   emotionBars: document.querySelector('#emotionBars'),
@@ -103,6 +110,7 @@ boot();
 
 async function boot() {
   renderHistory();
+  renderProgram();
   wireEvents();
   await loadServerCapabilities();
 }
@@ -449,6 +457,7 @@ async function analyzeEntry() {
     renderEmotionDetection(emotionDetection);
     storeHistory(combined, vocalMetrics, textAnalysis, transcript, emotionDetection);
     renderHistory();
+    refreshProgramIfNeeded(textAnalysis);
     elements.analysisStatus.textContent = 'Analysis complete.';
   } catch (error) {
     console.error(error);
@@ -471,6 +480,7 @@ async function analyzeTextOnly(transcript) {
     renderEmotionDetection(emotionDetection);
     storeHistory(combined, vocalMetrics, textAnalysis, transcript, null);
     renderHistory();
+    refreshProgramIfNeeded(textAnalysis);
     elements.analysisStatus.textContent = 'Analysis complete.';
   } catch (error) {
     console.error(error);
@@ -1775,4 +1785,164 @@ function renderEmotionDetection(emotionDetection) {
   } else {
     elements.emotionDominant.textContent = '';
   }
+}
+
+// ── Daily Programme ───────────────────────────────────────────────────────────
+
+function loadProgram() {
+  try { return JSON.parse(localStorage.getItem(PROGRAM_KEY) || 'null'); } catch { return null; }
+}
+
+function saveProgram(program) {
+  localStorage.setItem(PROGRAM_KEY, JSON.stringify(program));
+}
+
+function loadCompletions() {
+  try { return JSON.parse(localStorage.getItem(COMPLETIONS_KEY) || '{}'); } catch { return {}; }
+}
+
+function saveCompletions(completions) {
+  localStorage.setItem(COMPLETIONS_KEY, JSON.stringify(completions));
+}
+
+function shouldRefreshProgram(textAnalysis) {
+  const program = loadProgram();
+  if (!program) return true;
+  const ageDays = (Date.now() - new Date(program.generatedAt).getTime()) / (1000 * 60 * 60 * 24);
+  if (ageDays >= 7) return true;
+  const levelMap = { low: 0, moderate: 1, high: 2 };
+  const prev = levelMap[program.concernLevel] ?? 0;
+  const curr = levelMap[textAnalysis.concernLevel] ?? 0;
+  if (Math.abs(curr - prev) >= 2) return true;
+  return false;
+}
+
+async function generateProgram(textAnalysis) {
+  const history = JSON.stringify(readHistory().slice(0, 7));
+  try {
+    const res = await fetch('/api/generate-program', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        emotionalState: textAnalysis.emotionalState || 'steady',
+        concernLevel: textAnalysis.concernLevel || 'low',
+        feedback: textAnalysis.feedback || '',
+        history
+      })
+    });
+    if (!res.ok) throw new Error('Server error');
+    const data = await res.json();
+    saveProgram({ ...data, generatedAt: new Date().toISOString(), concernLevel: textAnalysis.concernLevel || 'low' });
+  } catch {
+    // Fall through — server returns fallback, or we keep existing program
+  }
+}
+
+function refreshProgramIfNeeded(textAnalysis) {
+  if (shouldRefreshProgram(textAnalysis)) {
+    generateProgram(textAnalysis).then(() => renderProgram());
+  } else {
+    renderProgram();
+  }
+}
+
+function getCompletionInsight() {
+  const completions = loadCompletions();
+  const history = readHistory();
+  if (history.length < 3) return null;
+
+  const days = Object.keys(completions).sort().slice(-7);
+  if (days.length < 3) return null;
+
+  const avgCompletion = days.reduce((sum, d) => {
+    const arr = completions[d] || [];
+    return sum + (arr.length ? arr.filter(Boolean).length / arr.length : 0);
+  }, 0) / days.length;
+
+  const levelScore = { stable: 0, elevated: 1, high: 2, rest: 0 };
+  const recentScores = history.slice(0, 5).map(e => levelScore[e.level] ?? 0);
+  const trend = recentScores.length >= 2 ? recentScores[0] - recentScores[recentScores.length - 1] : 0;
+
+  if (avgCompletion >= 0.6 && trend < 0) {
+    return { text: 'You\'ve been showing up consistently — your check-ins are trending in a better direction. Keep going.', type: 'positive' };
+  }
+  if (avgCompletion >= 0.6 && trend >= 0 && days.length >= 5) {
+    return { text: 'You\'re putting in the work. Let\'s try a fresh set of activities — a new programme will generate on your next check-in.', type: 'warn' };
+  }
+  if (avgCompletion < 0.3 && days.length >= 3) {
+    return { text: 'Even one activity a day makes a difference. Pick whichever feels most doable right now.', type: 'nudge' };
+  }
+  return null;
+}
+
+function renderProgram() {
+  const program = loadProgram();
+  if (!program || !Array.isArray(program.activities) || !program.activities.length) {
+    elements.programCard.hidden = true;
+    return;
+  }
+
+  const completions = loadCompletions();
+  const today = todayDateKey();
+  const todayDone = Array.isArray(completions[today])
+    ? [...completions[today]]
+    : program.activities.map(() => false);
+
+  elements.programCard.hidden = false;
+  elements.programNote.textContent = program.programNote || '';
+
+  const ageDays = Math.floor((Date.now() - new Date(program.generatedAt).getTime()) / (1000 * 60 * 60 * 24));
+  elements.programMeta.textContent = ageDays === 0 ? 'updated today' : `updated ${ageDays}d ago`;
+
+  elements.programList.innerHTML = '';
+  program.activities.forEach((activity, i) => {
+    const done = Boolean(todayDone[i]);
+    const item = document.createElement('li');
+    item.className = `program-item${done ? ' done' : ''}`;
+    item.dataset.index = i;
+    item.innerHTML = `
+      <div class="program-checkbox"></div>
+      <div class="program-item-body">
+        <p class="program-item-title">${escapeHtml(activity.title)}</p>
+        <p class="program-item-desc">${escapeHtml(activity.description)}</p>
+      </div>
+      <div class="program-item-right">
+        <span class="program-duration">${escapeHtml(activity.duration)}</span>
+        <span class="program-category" data-cat="${escapeHtml(activity.category)}">${escapeHtml(activity.category)}</span>
+      </div>
+    `;
+    item.addEventListener('click', () => toggleActivity(i));
+    elements.programList.append(item);
+  });
+
+  const insight = getCompletionInsight();
+  if (insight) {
+    elements.programInsight.hidden = false;
+    elements.programInsight.textContent = insight.text;
+    elements.programInsight.dataset.type = insight.type === 'warn' ? 'warn' : insight.type === 'nudge' ? 'nudge' : '';
+  } else {
+    elements.programInsight.hidden = true;
+  }
+}
+
+function toggleActivity(index) {
+  const program = loadProgram();
+  if (!program) return;
+  const completions = loadCompletions();
+  const today = todayDateKey();
+  const todayDone = Array.isArray(completions[today])
+    ? [...completions[today]]
+    : program.activities.map(() => false);
+  todayDone[index] = !todayDone[index];
+  completions[today] = todayDone;
+  saveCompletions(completions);
+  renderProgram();
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }

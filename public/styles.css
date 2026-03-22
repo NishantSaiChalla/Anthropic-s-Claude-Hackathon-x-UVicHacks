@@ -535,6 +535,159 @@ textarea:focus {
   color: var(--ink-soft);
 }
 
+/* ── Daily Programme ─────────────────────── */
+
+.program-card {
+  padding: 1rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.program-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 0.3rem;
+}
+
+.program-header h4 {
+  margin: 0;
+}
+
+.program-meta {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.program-note {
+  margin: 0 0 0.8rem;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.program-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.program-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 14px;
+  background: rgba(23, 36, 47, 0.04);
+  cursor: pointer;
+  transition: background 150ms ease, opacity 150ms ease;
+  user-select: none;
+}
+
+.program-item:hover {
+  background: rgba(23, 36, 47, 0.08);
+}
+
+.program-item.done {
+  opacity: 0.5;
+}
+
+.program-checkbox {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid rgba(23, 36, 47, 0.22);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.program-item.done .program-checkbox {
+  background: var(--mint);
+  border-color: var(--mint);
+}
+
+.program-item.done .program-checkbox::after {
+  content: '';
+  display: block;
+  width: 5px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg) translateY(-1px);
+}
+
+.program-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.program-item-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+
+.program-item-desc {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin: 0.1rem 0 0;
+}
+
+.program-item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.program-duration {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.program-category {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.program-category[data-cat='physical']   { background: rgba(95, 139, 126, 0.15); color: var(--mint); }
+.program-category[data-cat='social']     { background: rgba(207, 95, 60, 0.15);  color: var(--accent); }
+.program-category[data-cat='rest']       { background: rgba(217, 122, 32, 0.15); color: var(--warning); }
+.program-category[data-cat='creative']   { background: rgba(142, 68, 173, 0.15); color: #8e44ad; }
+.program-category[data-cat='mindfulness']{ background: rgba(52, 152, 219, 0.15); color: #3498db; }
+
+.program-insight {
+  margin: 0.75rem 0 0;
+  font-size: 0.84rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(95, 139, 126, 0.12);
+  color: var(--ink);
+}
+
+.program-insight[data-type='warn'] {
+  background: rgba(217, 122, 32, 0.12);
+}
+
+.program-insight[data-type='nudge'] {
+  background: rgba(23, 36, 47, 0.06);
+}
+
+/* ── End Daily Programme ─────────────────── */
+
 .emotion-detection-card {
   padding: 1rem;
   border-radius: 22px;
