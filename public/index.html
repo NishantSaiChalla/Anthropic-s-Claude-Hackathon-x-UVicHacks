@@ -159,15 +159,6 @@
             </div>
             <textarea id="transcriptInput" rows="8" placeholder="Today I felt..."></textarea>
             <div id="transcriptStatus" class="status-text transcript-status">Record or upload audio to generate a transcript.</div>
-            <div class="analysis-mode-row">
-              <span class="field-label">Analysis depth</span>
-              <div class="mode-toggle" role="tablist" aria-label="Analysis depth">
-                <button id="analysisBasicButton" class="mode-button" type="button" role="tab" aria-selected="false">Basic</button>
-                <button id="analysisAdvancedButton" class="mode-button active" type="button" role="tab" aria-selected="true">Advanced</button>
-                <button id="analysisDirectButton" class="mode-button" type="button" role="tab" aria-selected="false">Direct</button>
-              </div>
-              <p id="analysisModeHint" class="analysis-mode-hint">GPT-powered emotional analysis</p>
-            </div>
             <div class="button-row compact-row">
               <button id="analyzeButton" class="primary-button" disabled>Analyze check-in</button>
               <span id="analysisStatus" class="status-text">Waiting for audio</span>
@@ -194,12 +185,7 @@
             <div class="result-banner" id="resultBanner">Stable</div>
             <h3 id="resultHeadline">Your signals look balanced today.</h3>
             <p id="resultSummary"></p>
-            <div class="emotion-detection-card" id="emotionCard" hidden>
-              <h4>ML Emotion Detection</h4>
-              <p class="emotion-model-label" id="emotionModelLabel"></p>
-              <div class="emotion-bars" id="emotionBars"></div>
-              <p class="emotion-dominant" id="emotionDominant"></p>
-            </div>
+
             <div class="guidance-card">
               <h4>Feedback and tips</h4>
               <p id="feedbackNarrative"></p>
