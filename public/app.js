@@ -104,8 +104,29 @@ boot();
 async function boot() {
   renderHistory();
   wireEvents();
+  wireNavigation();
+  navigateTo('home');
   await loadServerCapabilities();
 }
+
+function wireNavigation() {
+  document.querySelectorAll('.nav-item').forEach((btn) => {
+    btn.addEventListener('click', () => navigateTo(btn.dataset.page));
+  });
+}
+
+function navigateTo(pageId) {
+  document.querySelectorAll('.page').forEach((page) => {
+    page.classList.toggle('hidden', page.id !== `page-${pageId}`);
+  });
+  document.querySelectorAll('.nav-item').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.page === pageId);
+  });
+  document.querySelector('.app-main').scrollTop = 0;
+}
+
+// Expose for inline onclick handlers on the home page
+window.navigateTo = navigateTo;
 
 function wireEvents() {
   elements.startButton.addEventListener('click', startRecording);
@@ -450,6 +471,7 @@ async function analyzeEntry() {
     storeHistory(combined, vocalMetrics, textAnalysis, transcript, emotionDetection);
     renderHistory();
     elements.analysisStatus.textContent = 'Analysis complete.';
+    navigateTo('results');
   } catch (error) {
     console.error(error);
     elements.analysisStatus.textContent = `Analysis failed: ${error.message || 'Check your server and API configuration.'}`;
@@ -472,6 +494,7 @@ async function analyzeTextOnly(transcript) {
     storeHistory(combined, vocalMetrics, textAnalysis, transcript, null);
     renderHistory();
     elements.analysisStatus.textContent = 'Analysis complete.';
+    navigateTo('results');
   } catch (error) {
     console.error(error);
     elements.analysisStatus.textContent = `Analysis failed: ${error.message}`;
