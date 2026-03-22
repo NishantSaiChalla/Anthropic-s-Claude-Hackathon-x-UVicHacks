@@ -3,14 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ellipsis Health</title>
+    <title>Voice Pulse</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <nav class="sidebar">
       <div class="sidebar-brand">
-        <span class="brand-mark">&#11044;</span>
-        <span class="brand-name">Ellipsis</span>
+        <a class="sidebar-brand-link" href="#" onclick="navigateTo('home'); return false;">
+          <span class="brand-mark">&#11044;</span>
+          <span class="brand-name">Voice Pulse</span>
+        </a>
       </div>
       <ul class="sidebar-nav" role="list">
         <li>
@@ -46,7 +48,7 @@
       <section class="page" id="page-home">
         <div class="home-hero">
           <div class="home-hero-text">
-            <p class="home-eyebrow">Ellipsis Health</p>
+            <p class="home-eyebrow">Voice Pulse</p>
             <h1>Your daily emotional check-in.</h1>
             <p class="home-sub">Record a short voice note each day. We blend vocal pacing with transcript sentiment to help you notice emotional patterns before they become problems.</p>
             <button class="primary-button home-cta" type="button" onclick="navigateTo('checkin')">Start today's check-in</button>
@@ -79,7 +81,7 @@
           </button>
         </div>
 
-        <p class="home-disclaimer">Ellipsis is not a medical device and does not provide clinical diagnoses. If you are in crisis, please contact a qualified mental health professional.</p>
+        <p class="home-disclaimer">Voice Pulse is not a medical device and does not provide clinical diagnoses. If you are in crisis, please contact a qualified mental health professional.</p>
       </section>
 
       <!-- Check-in Page -->
@@ -105,7 +107,7 @@
               Browser speech recognition is unavailable. Recordings still work.
             </div>
             <div id="uploadInfo" class="warning-banner" hidden>
-              Uploaded audio can be sent to GPT for transcription and analysis.
+              Uploaded audio can be sent to AI for transcription and analysis.
             </div>
 
             <div class="meter-wrap" id="recordingPanel">

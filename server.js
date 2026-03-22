@@ -363,7 +363,7 @@ app.get('*', (_request, response) => {
 });
 
 app.listen(port, () => {
-  console.log(`Ellipsis Health MVP listening on http://localhost:${port}`);
+  console.log(`Voice Pulse listening on http://localhost:${port}`);
 });
 
 async function analyzeAudioDirectly(file) {

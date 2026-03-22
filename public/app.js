@@ -1,7 +1,7 @@
 const RECORDING_LIMIT_SECONDS = 30;
-const HISTORY_KEY = 'ellipsis-health-history';
-const PROGRAM_KEY = 'ellipsis-program';
-const COMPLETIONS_KEY = 'ellipsis-program-completions';
+const HISTORY_KEY = 'voice-pulse-history';
+const PROGRAM_KEY = 'voice-pulse-program';
+const COMPLETIONS_KEY = 'voice-pulse-program-completions';
 const SPEECH_WARNING_MESSAGE = 'Browser speech recognition is unavailable. Recordings still work, but type your transcript manually.';
 
 const RECORDING_MODE = 'record';
@@ -262,7 +262,7 @@ function refreshCapabilityWarnings() {
 
   elements.uploadInfo.hidden = captureMode !== UPLOAD_MODE;
   elements.uploadInfo.textContent = serverCapabilities.openAiConfigured
-    ? 'Uploaded audio can also be sent to GPT for transcription and analysis.'
+    ? 'Uploaded audio can also be sent to AI for transcription and analysis.'
     : 'Uploaded audio works, but add a transcript manually unless OPENAI_API_KEY is configured.';
 
   if (!audioBlob || isTranscribing) {
@@ -283,7 +283,7 @@ async function handleUploadedFile(file) {
   await finalizeRecording(file, { skipTranscription: !serverCapabilities.openAiConfigured });
   setTranscriptStatus(
     serverCapabilities.openAiConfigured
-      ? 'Uploaded audio loaded. GPT transcription can run now.'
+      ? 'Uploaded audio loaded. AI transcription can run now.'
       : 'Uploaded audio loaded. Add a transcript manually before analysis.'
   );
   elements.analysisStatus.textContent = serverCapabilities.openAiConfigured
@@ -301,7 +301,7 @@ async function loadServerCapabilities() {
     serverCapabilities = await response.json();
     setTranscriptStatus(
       serverCapabilities.openAiConfigured
-        ? 'Record or upload audio to transcribe and analyze it with GPT.'
+        ? 'Record or upload audio to transcribe and analyze it with AI.'
         : 'OPENAI_API_KEY is not configured yet. Record or upload audio and type a summary manually, or add the key to enable audio transcription.'
     );
   } catch (error) {
@@ -335,7 +335,7 @@ async function startRecording() {
     elements.transcribeButton.disabled = true;
     setTranscriptStatus(
       serverCapabilities.openAiConfigured
-        ? 'Recording started. The saved audio will be uploaded for GPT transcription after you stop.'
+        ? 'Recording started. The saved audio will be uploaded for AI transcription after you stop.'
         : 'Recording started. Add OPENAI_API_KEY to enable server-side transcription.'
     );
 
@@ -447,7 +447,7 @@ async function analyzeEntry() {
   }
 
   elements.analysisStatus.textContent = serverCapabilities.openAiConfigured
-    ? 'Uploading audio for GPT transcription and analysis...'
+    ? 'Uploading audio for AI transcription and analysis...'
     : 'Analyzing vocal cues with keyword matching...';
   elements.analyzeButton.disabled = true;
 
@@ -1439,7 +1439,7 @@ function startSpeechRecognition() {
     elements.speechWarning.hidden = false;
     elements.speechWarning.textContent = SPEECH_WARNING_MESSAGE;
     if (serverCapabilities.openAiConfigured) {
-      setTranscriptStatus('Live browser transcript is unavailable here. The saved recording will be uploaded for GPT transcription after capture.');
+      setTranscriptStatus('Live browser transcript is unavailable here. The saved recording will be uploaded for AI transcription after capture.');
     }
     return;
   }
@@ -1464,7 +1464,7 @@ function startSpeechRecognition() {
     elements.speechWarning.hidden = false;
     elements.speechWarning.textContent = 'Speech recognition ran into an issue. You can continue by typing the transcript manually.';
     if (serverCapabilities.openAiConfigured) {
-      setTranscriptStatus('Live transcript capture had an issue. The saved recording will still be uploaded for GPT transcription.');
+      setTranscriptStatus('Live transcript capture had an issue. The saved recording will still be uploaded for AI transcription.');
     }
   };
 
@@ -1631,7 +1631,7 @@ async function transcribeRecording({ forceRefresh = false } = {}) {
 
   isTranscribing = true;
   elements.transcribeButton.disabled = true;
-  setTranscriptStatus('Uploading audio for GPT transcription...');
+  setTranscriptStatus('Uploading audio for AI transcription...');
 
   try {
     const transcript = await requestRecordingTranscription(audioBlob);
@@ -1642,7 +1642,7 @@ async function transcribeRecording({ forceRefresh = false } = {}) {
     finalTranscript = transcript;
     hasRecordedTranscription = true;
     elements.transcriptInput.value = transcript;
-    setTranscriptStatus('Saved recording transcribed successfully through GPT audio.');
+    setTranscriptStatus('Saved recording transcribed successfully through AI audio.');
     elements.analysisStatus.textContent = 'Ready to analyze.';
   } catch (error) {
     console.error(error);

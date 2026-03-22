@@ -1,6 +1,6 @@
-# Ellipsis Health Voice Check-In MVP
+# Voice Pulse
 
-Hackathon prototype inspired by Ellipsis Health's use of voice biomarkers for early mental health signal detection.
+Hackathon prototype inspired by voice biomarkers for early mental health signal detection.
 
 This project asks a user to record a short daily voice note, uploads the recording to GPT for transcription and transcript analysis, combines that with lightweight vocal cues such as pace, silence, and energy variation, and returns a simple emotional-state flag for the day.
 
