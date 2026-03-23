@@ -8,6 +8,8 @@ __pycache__/
 *.pyc
 *.pyo
 venv/
+.venv/
+.run/
 
 # Debug Logs
 *_debug.txt

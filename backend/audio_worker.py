@@ -117,9 +117,10 @@ class AudioWorker:
             _dominance_raw = float(preds[1])
             valence_raw = float(preds[2])
 
-        # Confidence heuristic: VAD * duration penalty (< 2s context hurts accuracy)
-        dur_penalty = min(1.0, duration_sec / 2.0)
-        confidence = float(vad_prob * dur_penalty)
+        # Keep short but expressive speech from being discounted too aggressively.
+        dur_penalty = min(1.0, max(0.6, duration_sec / 2.0))
+        base_conf = max(0.35, vad_prob)
+        confidence = float(min(1.0, base_conf * dur_penalty))
 
         # Rescale [0,1] -> [-1,1] to align with visual model V/A space
         return {

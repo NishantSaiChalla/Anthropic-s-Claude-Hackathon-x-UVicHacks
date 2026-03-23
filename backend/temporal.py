@@ -24,9 +24,7 @@ class SessionTemporalState:
         is_stale = False
 
         if signal_status in ("FULL_AV", "AUDIO_ONLY", "VIDEO_ONLY"):
-            # Drastically reduce alpha to smooth out transitions (flicker prevention)
-            # Use 0.1 for slow drift, up to 0.4 for high-confidence spikes
-            effective_alpha = max(0.1, min(0.4, confidence * 0.5))
+            effective_alpha = max(self.ema_alpha, min(0.92, 0.25 + confidence))
             
             self.last_v = (effective_alpha * raw_v) + (
                 (1 - effective_alpha) * self.last_v

@@ -28,6 +28,8 @@ async def websocket_endpoint(websocket: WebSocket):
     # Per-connection state
     session_state = SessionStateManager()
     session_temporal = SessionTemporalState()
+    pending_video_req = None
+    video_task = None
 
     async def fusion_loop():
         while True:
@@ -36,6 +38,19 @@ async def websocket_endpoint(websocket: WebSocket):
             a_state, v_state = await session_state.get_states()
             result = compute_fusion(a_state, v_state, session_temporal, now)
             await websocket.send_json(result)
+
+    async def drain_video_queue(initial_req: dict):
+        nonlocal pending_video_req, video_task
+
+        req = initial_req
+        try:
+            while req is not None:
+                res = await asyncio.to_thread(global_video_worker.infer, req)
+                await session_state.update_video(res)
+                req = pending_video_req
+                pending_video_req = None
+        finally:
+            video_task = None
 
     loop_task = asyncio.create_task(fusion_loop())
 
@@ -61,25 +76,27 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.warning("Bad video payload: %s", e)
                     continue
                 req = {
-                    "tensor": payload,
-                    "quality_hints": data.get("quality_hints", {}),
+                    "tensor": payload["tensor"],
+                    "rgb_image": payload.get("rgb_image"),
+                    "quality_hints": {
+                        **data.get("quality_hints", {}),
+                        **payload.get("quality_hints", {}),
+                    },
                 }
-                asyncio.create_task(
-                    _process_video(req, session_state)
-                )
+                if video_task and not video_task.done():
+                    pending_video_req = req
+                else:
+                    video_task = asyncio.create_task(drain_video_queue(req))
     except WebSocketDisconnect:
         logger.info("Client disconnected")
     except Exception as e:
         logger.error("WS error: %s", e)
     finally:
         loop_task.cancel()
+        if video_task:
+            video_task.cancel()
 
 
 async def _process_audio(req: dict, state: SessionStateManager):
     res = await asyncio.to_thread(global_audio_worker.infer, req)
     await state.update_audio(res)
-
-
-async def _process_video(req: dict, state: SessionStateManager):
-    res = await asyncio.to_thread(global_video_worker.infer, req)
-    await state.update_video(res)

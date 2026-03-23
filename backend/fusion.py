@@ -10,42 +10,50 @@ def log_debug(msg: str):
 
 
 def map_categorical(v: float, a: float, confidence: float = 1.0) -> str:
-    """Nuanced mapping of Valence/Arousal to categorical labels."""
-    if confidence < 0.15:
+    if confidence < 0.18:
         return "Uncertain"
-    
-    # ── High Arousal (Surprised, Fearful, Angry, Excited) ─────────
-    if a > 0.3: # WAS 0.4
-        if v > 0.2: # WAS 0.4
-            return "Surprised" if a > 0.55 else "Excited"
-        if v < -0.15: # WAS -0.3
+
+    if a >= 0.72:
+        if v >= 0.10:
+            return "Surprised"
+        if v <= -0.45:
             return "Angry"
-        return "Stressed" if v < 0 else "Alert"
-    
-    # ── High Valence (Happy, Content, Calm) ───────────────────────
-    if v > 0.2: # WAS 0.35
-        if a > 0.0: return "Happy" # WAS 0.1
-        if a < -0.2: return "Calm"
+        return "Fearful"
+
+    if a >= 0.38:
+        if v >= 0.38:
+            return "Happy"
+        if v <= -0.45:
+            return "Angry"
+        if v < -0.12:
+            return "Stressed"
+
+    if a <= -0.30:
+        if v >= 0.28:
+            return "Calm"
+        if v <= -0.32:
+            return "Sad"
+
+    if v >= 0.48:
         return "Content"
-    
-    # ── Low Valence (Sad, Disgusted, Frustrated) ──────────────────
-    if v < -0.2: # WAS -0.35
-        if a < 0.1: return "Sad" # WAS -0.1
-        return "Disgusted" if a > 0.2 else "Frustrated"
-    
-    # ── Low Arousal (Bored, Tired) ───────────────────────────────
-    if a < -0.25: # WAS -0.35
-        return "Calm" if v > 0 else "Bored"
-    
-    # ── Center Region (Neutral) ──────────────────────────────────
-    if abs(v) < 0.12 and abs(a) < 0.12: # WAS 0.2
+    if v <= -0.58:
+        return "Disgusted"
+
+    if abs(v) <= 0.12 and abs(a) <= 0.12:
         return "Neutral"
-    
-    # Fallback for anything else
-    if v > 0:
-        return "Positive"
-    else:
-        return "Negative"
+
+    if v < -0.18 and a > 0.18:
+        return "Stressed"
+    if v < -0.22 and a < -0.08:
+        return "Sad"
+    if v > 0.18 and a > 0.18:
+        return "Happy"
+    if v > 0.18 and a < 0.00:
+        return "Content"
+    if v < -0.18:
+        return "Disgusted"
+
+    return "Neutral"
 
 
 def compute_fusion(
@@ -72,10 +80,21 @@ def compute_fusion(
     w_v, val_v, aro_v = 0.0, 0.0, 0.0
     pose_good = True
     blur_good = True
+    face_detected = True
+    face_area_ratio = 0.0
     if v_valid:
         pose_good = abs(v_state["yaw"]) <= 30 and abs(v_state["pitch"]) <= 30
         blur_good = v_state["blur"] >= 100
-        w_v = v_state["conf"] * (1.0 if (pose_good and blur_good) else 0.2)
+        face_detected = bool(v_state.get("face_detected", True))
+        face_area_ratio = float(v_state.get("face_area_ratio", 0.0))
+        pose_mult = 1.0 if pose_good else 0.55
+        blur_mult = 1.0 if blur_good else 0.6
+        face_mult = 1.0 if face_detected else 0.25
+        if face_area_ratio < 0.05:
+            face_mult *= 0.4
+        elif face_area_ratio < 0.10:
+            face_mult *= 0.7
+        w_v = v_state["conf"] * pose_mult * blur_mult * face_mult
         val_v, aro_v = v_state["val"], v_state["aro"]
 
     total_w = w_a + w_v
@@ -115,7 +134,10 @@ def compute_fusion(
             "raw_video_valence": round(float(val_v), 4) if v_valid else 0.0,
             "raw_video_arousal": round(float(aro_v), 4) if v_valid else 0.0,
             "raw_video_class": v_state.get("raw_class", -1) if (v_valid and v_state) else -1,
+            "raw_video_label": v_state.get("raw_label", "unknown") if (v_valid and v_state) else "unknown",
+            "raw_video_model": v_state.get("vision_model", "unknown") if (v_valid and v_state) else "unknown",
             "raw_video_confidence": round(float(v_state.get("raw_conf", 0.0)), 4) if (v_valid and v_state) else 0.0,
+            "raw_video_face_area_ratio": round(float(face_area_ratio), 4) if v_valid else 0.0,
             "fused_valence": round(float(raw_v), 4),
             "fused_arousal": round(float(raw_a), 4),
             "label_confidence": label_conf,
@@ -126,7 +148,8 @@ def compute_fusion(
         },
         "quality_flags": {
             "audio_vad_active": audio_vad_active,
-            "video_face_detected": v_valid,
+            "video_face_detected": v_valid and face_detected,
+            "video_face_small_warning": v_valid and face_detected and face_area_ratio < 0.10,
             "video_blur_warning": v_valid and not blur_good,
             "video_pose_warning": v_valid and not pose_good,
         },
