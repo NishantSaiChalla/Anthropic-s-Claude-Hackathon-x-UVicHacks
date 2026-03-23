@@ -1,3 +1,5 @@
+import { startEmotionEngine } from './emotion-ws.js';
+
 const RECORDING_LIMIT_SECONDS = 30;
 const HISTORY_KEY = 'ellipsis-health-history';
 const SPEECH_WARNING_MESSAGE = 'Browser speech recognition is unavailable. Recordings still work, but type your transcript manually.';
@@ -107,6 +109,7 @@ async function boot() {
   renderHistory();
   wireEvents();
   await loadServerCapabilities();
+  startEmotionEngine();
 }
 
 function wireEvents() {

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ellipsis Health MVP</title>
+    <title>Voice Pulse</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
     <div class="background-orb orb-two"></div>
     <main class="app-shell">
       <section class="hero-card panel">
-        <div class="eyebrow">Ellipsis Health MVP</div>
+        <div class="eyebrow">Voice Pulse</div>
         <h1>Daily voice check-ins that surface emotional drift early.</h1>
         <p class="hero-copy">
           Record one 30-second note, blend vocal pacing with transcript sentiment, and flag
@@ -193,6 +193,29 @@
           <div id="historyList" class="history-list"></div>
         </section>
       </section>
+
+      <!-- Live Emotion Engine Panel -->
+      <aside class="emotion-live-panel" id="emotionLivePanel">
+        <div class="emotion-live-header">
+          <span class="emotion-conn-dot" id="emotionConnDot" data-connected="false"></span>
+          <span class="emotion-live-title">Emotion Engine</span>
+        </div>
+        <video id="emotionCameraPreview" class="emotion-camera-preview" muted playsinline autoplay></video>
+        <div class="emotion-live-label" id="emotionStateBadge" data-state="UNKNOWN">—</div>
+        <div class="emotion-live-row">
+          <span>V</span><span id="emotionValence">0.00</span>
+          <span>A</span><span id="emotionArousal">0.00</span>
+        </div>
+        <div class="emotion-live-meta" id="emotionSystemState">—</div>
+        <div class="emotion-live-meta" id="emotionWeights">A: 0  V: 0</div>
+        <div class="emotion-live-meta" id="emotionConf">Conf: 0.00</div>
+        <div class="emotion-live-debug" id="emotionDebug" style="font-size: 10px; opacity: 0.7; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 8px; padding-top: 8px;">
+          <div id="debugAudio">A: 0.00 / 0.00</div>
+          <div id="debugVideo">V: 0.00 / 0.00 (Class: -)</div>
+          <div id="debugFused">F: 0.00 / 0.00</div>
+        </div>
+        <div class="emotion-live-meta" id="emotionQuality" style="margin-top: 4px;">—</div>
+      </aside>
     </main>
 
     <script type="module" src="/app.js"></script>

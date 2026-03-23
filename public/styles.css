@@ -1107,3 +1107,104 @@ textarea:focus {
     font-size: 0.86rem;
   }
 }
+
+/* ── Live Emotion Engine Panel ──────────────────────────────── */
+
+.emotion-live-panel {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 100;
+  width: 220px;
+  padding: 1rem;
+  border-radius: 22px;
+  backdrop-filter: blur(16px);
+  background: rgba(255, 250, 244, 0.88);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 12px 40px rgba(29, 31, 34, 0.15);
+  display: grid;
+  gap: 0.45rem;
+  animation: rise-in 600ms ease;
+}
+
+.emotion-live-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.emotion-conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ab3f45;
+  transition: background 300ms;
+}
+
+.emotion-conn-dot[data-connected='true'] {
+  background: #5f8b7e;
+  box-shadow: 0 0 6px rgba(95, 139, 126, 0.5);
+}
+
+.emotion-live-title {
+  font-size: 0.72rem;
+  font-family: 'Consolas', 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+.emotion-camera-preview {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  background: #000;
+  object-fit: cover;
+  max-height: 120px;
+  display: none;
+}
+
+.emotion-live-label {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: center;
+  padding: 0.2rem 0;
+  transition: color 300ms;
+}
+
+.emotion-live-label[data-state='STABLE'] { color: var(--mint); }
+.emotion-live-label[data-state='DEGRADED'] { color: var(--warning); }
+.emotion-live-label[data-state='HELD_STALE'] { color: var(--ink-soft); }
+.emotion-live-label[data-state='UNKNOWN'] { color: var(--danger); }
+
+.emotion-live-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.8rem;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+
+.emotion-live-row span:nth-child(odd) {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.emotion-live-meta {
+  font-size: 0.72rem;
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: var(--ink-soft);
+  text-align: center;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .emotion-live-panel {
+    width: 180px;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    padding: 0.75rem;
+  }
+}
