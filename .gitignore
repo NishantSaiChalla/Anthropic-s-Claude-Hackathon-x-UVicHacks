@@ -2,3 +2,18 @@ node_modules/
 .env
 .DS_Store
 npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+
+# Debug Logs
+*_debug.txt
+results.txt
+uvicorn_out.txt
+validation_output.txt
+frontend_log.txt
+debug_results.txt
+fusion_debug.txt
